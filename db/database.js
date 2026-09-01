@@ -251,7 +251,7 @@ CREATE TABLE IF NOT EXISTS messages (
 /*  Placeholder translation for PostgreSQL                             */
 /* ------------------------------------------------------------------ */
 function expandPg(sql, params) {
-  let text = sql.replace(/datetime\('now'\)/g, 'now()');
+  let text = sql.replace(/datetime\(['"]now['"]\)/g, 'now()');
   let values;
   if (Array.isArray(params)) {
     values = params;
@@ -366,6 +366,8 @@ async function init() {
     await pgPool.query('SELECT 1');
     await pgPool.query(PG_SCHEMA);
     await pgPool.query("ALTER TABLE customers ADD COLUMN IF NOT EXISTS password_hash TEXT NOT NULL DEFAULT ''");
+    // older PG schema lacked updated_at on users; boot-time admin sync sets it
+    await pgPool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now()');
     await pgPool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_email ON customers(email) WHERE email <> ''`);
   } else {
     const Database = require('better-sqlite3');
@@ -379,6 +381,7 @@ async function init() {
     if (!custCols.includes('password_hash')) {
       sqliteDb.exec("ALTER TABLE customers ADD COLUMN password_hash TEXT DEFAULT ''");
     }
+    sqliteDb.exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TEXT DEFAULT (datetime('now'))");
     sqliteDb.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_email ON customers(email) WHERE email != ''`);
   }
   return module.exports;
