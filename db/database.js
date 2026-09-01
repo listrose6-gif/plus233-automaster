@@ -360,7 +360,8 @@ async function init() {
     pgPool = new Pool({
       connectionString: process.env.DATABASE_URL,
       ssl: { rejectUnauthorized: false },
-      max: 5
+      max: 5,
+      connectionTimeoutMillis: 15000
     });
     await pgPool.query('SELECT 1');
     await pgPool.query(PG_SCHEMA);

@@ -550,11 +550,40 @@ app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
 app.use((req, res) => res.status(404).sendFile(path.join(__dirname, 'public', '404.html')));
 
 /* ---------------------------------------------------------------- */
-/*  Boot: init DB → seed if empty → sync admin env → listen          */
+/*  Boot: init DB (with retries) → seed if empty → sync admin → listen */
 /* ---------------------------------------------------------------- */
+// A rejected promise in an Express 4 async handler must never take the
+// whole site down — log it and keep serving (the pool reconnects).
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled rejection:', reason && reason.message ? reason.message : reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught exception:', err && err.stack ? err.stack : err);
+});
+
+async function initWithRetry(attempts, delays) {
+  let lastErr;
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      await db.init();
+      return;
+    } catch (e) {
+      lastErr = e;
+      console.error(`DB init attempt ${i}/${attempts} failed: ${e.message}`);
+      if (i < attempts) {
+        const wait = delays[i - 1] || 15000;
+        console.log(`Retrying in ${Math.round(wait / 1000)}s…`);
+        await new Promise(r => setTimeout(r, wait));
+      }
+    }
+  }
+  throw lastErr;
+}
+
 (async () => {
   try {
-    await db.init();
+    // Retry so a sleeping/cold-starting Neon compute doesn't fail the boot.
+    await initWithRetry(6, [5000, 10000, 20000, 30000, 45000]);
     console.log(`Database engine: ${db.type}`);
 
     if ((await db.get('SELECT COUNT(*) c FROM products')).c === 0) {
