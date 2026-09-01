@@ -359,38 +359,37 @@ function parseCompat(str) {
   return { make: m[1], model: m[2], year_start: +m[3], year_end: +m[4], engine: m[5] ? m[5].split('|').map(s => s.trim()).join('|') : '' };
 }
 
-function seed() {
-  const count = db.prepare('SELECT COUNT(*) c FROM products').get().c;
+async function seed() {
+  const count = (await db.get('SELECT COUNT(*) c FROM products')).c;
   if (count > 0 && !process.env.FORCE) {
     console.log('Database already seeded (' + count + ' products). Use FORCE=1 to re-seed.');
     return false;
   }
 
-  db.exec('DELETE FROM order_items; DELETE FROM orders; DELETE FROM customers; DELETE FROM product_compatibility; DELETE FROM products; DELETE FROM categories; DELETE FROM vehicles; DELETE FROM users; DELETE FROM settings; DELETE FROM messages;');
+  await db.exec('DELETE FROM order_items; DELETE FROM orders; DELETE FROM customers; DELETE FROM product_compatibility; DELETE FROM products; DELETE FROM categories; DELETE FROM vehicles; DELETE FROM users; DELETE FROM settings; DELETE FROM messages;');
 
   // settings
-  const insSetting = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)');
-  for (const [k, v] of Object.entries(SETTINGS)) insSetting.run(k, String(v));
+  for (const [k, v] of Object.entries(SETTINGS)) {
+    await db.run('INSERT INTO settings (key, value) VALUES (?, ?)', k, String(v));
+  }
 
   // categories
-  const insCat = db.prepare('INSERT INTO categories (name, slug, description, image, sort_order) VALUES (?,?,?,?,?)');
   const catSlugToId = {};
   for (const [name, slug, desc, img, order] of CATEGORIES) {
-    const r = insCat.run(name, slug, desc, img, order);
+    const r = await db.run('INSERT INTO categories (name, slug, description, image, sort_order) VALUES (?,?,?,?,?)', name, slug, desc, img, order);
     catSlugToId[slug] = r.lastInsertRowid;
   }
 
   // vehicles
-  const insVeh = db.prepare('INSERT INTO vehicles (make, model, year_start, year_end, engines) VALUES (?,?,?,?,?)');
-  for (const [make, model, ys, ye, eng] of VEHICLES) insVeh.run(make, model, ys, ye, eng.join(','));
+  for (const [make, model, ys, ye, eng] of VEHICLES) {
+    await db.run('INSERT INTO vehicles (make, model, year_start, year_end, engines) VALUES (?,?,?,?,?)', make, model, ys, ye, eng.join(','));
+  }
 
-  // products + compatibility
-  const insProd = db.prepare(`INSERT INTO products (part_number, name, brand, category_id, description, price_ghs, stock_qty, low_stock_at, image_url, featured, active)
-    VALUES (@pn, @name, @brand, @cat, @desc, @price, @stock, @low, @img, @featured, 1)`);
-  const insCompat = db.prepare('INSERT INTO product_compatibility (product_id, make, model, year_start, year_end, engine) VALUES (?,?,?,?,?,?)');
-  const tx = db.transaction(() => {
+  // products + compatibility (atomic)
+  await db.transaction(async () => {
     for (const p of PRODUCTS) {
-      const r = insProd.run({
+      const r = await db.run(`INSERT INTO products (part_number, name, brand, category_id, description, price_ghs, stock_qty, low_stock_at, image_url, featured, active)
+        VALUES (@pn, @name, @brand, @cat, @desc, @price, @stock, @low, @img, @featured, 1)`, {
         pn: p.pn, name: p.name, brand: p.brand, cat: catSlugToId[p.cat],
         desc: p.desc, price: p.price, stock: p.stock, low: 10,
         img: p.img || CATEGORIES.find(c => c[1] === p.cat)[3],
@@ -398,18 +397,18 @@ function seed() {
       });
       for (const c of p.compat) {
         const row = parseCompat(c);
-        insCompat.run(r.lastInsertRowid, row.make, row.model, row.year_start, row.year_end, row.engine);
+        await db.run('INSERT INTO product_compatibility (product_id, make, model, year_start, year_end, engine) VALUES (?,?,?,?,?,?)',
+          r.lastInsertRowid, row.make, row.model, row.year_start, row.year_end, row.engine);
       }
     }
   });
-  tx();
 
-  // admin user (default: admin / admin123 — change in production!)
+  // admin user (default: admin / admin123 — override via ADMIN_USERNAME/ADMIN_PASSWORD env)
   const pw = hashPassword('admin123');
-  db.prepare('INSERT INTO users (username, password_hash, full_name, role) VALUES (?,?,?,?)')
-    .run('admin', pw, 'Store Administrator', 'admin');
+  await db.run('INSERT INTO users (username, password_hash, full_name, role) VALUES (?,?,?,?)',
+    'admin', pw, 'Store Administrator', 'admin');
 
-  const prodCount = db.prepare('SELECT COUNT(*) c FROM products').get().c;
+  const prodCount = (await db.get('SELECT COUNT(*) c FROM products')).c;
   console.log(`Seeded: ${CATEGORIES.length} categories, ${VEHICLES.length} vehicle models, ${prodCount} products, 1 admin user.`);
   return true;
 }
@@ -418,5 +417,9 @@ module.exports = { seed, parseCompat, hashPassword };
 
 // Run directly: node db/seed.js
 if (require.main === module) {
-  seed();
+  (async () => {
+    await db.init();
+    await seed();
+    process.exit(0);
+  })().catch(e => { console.error(e); process.exit(1); });
 }
