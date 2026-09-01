@@ -664,7 +664,7 @@ function renderLogin() {
           <div class="field"><label>Username</label><input id="l-user" autocomplete="username"></div>
           <div class="field"><label>Password</label><input id="l-pass" type="password" autocomplete="current-password"></div>
           <button class="btn btn-primary btn-block" type="submit">Sign In</button>
-          <div class="login-hint">Demo access — username: <b>admin</b> · password: <b>admin123</b></div>
+          <div class="login-hint">Sign in with the username &amp; password configured in your hosting environment (ADMIN_USERNAME / ADMIN_PASSWORD).</div>
         </form>
       </div>
     </div>`;

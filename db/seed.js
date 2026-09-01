@@ -414,7 +414,7 @@ function seed() {
   return true;
 }
 
-module.exports = { seed, parseCompat };
+module.exports = { seed, parseCompat, hashPassword };
 
 // Run directly: node db/seed.js
 if (require.main === module) {

@@ -23,6 +23,31 @@ if (db.prepare('SELECT COUNT(*) c FROM products').get().c === 0) {
   seed();
 }
 
+// Admin credentials from environment variables (production setup).
+// If ADMIN_USERNAME / ADMIN_PASSWORD are set in the hosting dashboard,
+// they override the seeded defaults on EVERY boot — so credentials
+// survive restarts even on ephemeral disks. The seeded 'admin/admin123'
+// user is removed when a custom username is configured.
+function syncAdminFromEnv() {
+  const uname = (process.env.ADMIN_USERNAME || '').trim();
+  const pass = process.env.ADMIN_PASSWORD || '';
+  if (!uname || !pass) return; // no env config → keep seeded credentials
+  const { hashPassword } = require('./db/seed');
+  const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(uname);
+  if (existing) {
+    db.prepare('UPDATE users SET password_hash = ?, updated_at = datetime(\'now\') WHERE id = ?')
+      .run(hashPassword(pass), existing.id);
+  } else {
+    db.prepare('INSERT INTO users (username, password_hash, full_name, role) VALUES (?,?,?,?)')
+      .run(uname, hashPassword(pass), 'Store Administrator', 'admin');
+    if (uname !== 'admin') {
+      db.prepare('DELETE FROM users WHERE username = ?').run('admin');
+    }
+  }
+  console.log(`Admin credentials synchronized from environment variables (username: "${uname}")`);
+}
+syncAdminFromEnv();
+
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 // Graceful image fallback: until real product photos exist, serve branded placeholders.
