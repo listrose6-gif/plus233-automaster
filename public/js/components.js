@@ -263,6 +263,9 @@ const PA = (() => {
     });
     save();
     onCart(() => {});
+    // account icon indicator when signed in
+    const accLink = el.querySelector('a[href="/account.html"]');
+    if (accLink && localStorage.getItem('pa233_customer_token')) accLink.classList.add('logged-in');
   }
 
   async function liveSearch(q) {

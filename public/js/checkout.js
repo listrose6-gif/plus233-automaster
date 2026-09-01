@@ -24,6 +24,16 @@ async function render() {
   const byId = Object.fromEntries(data.items.map(p => [p.id, p]));
   const s = await PA.settings();
 
+  // prefill from signed-in account
+  let acct = null;
+  try {
+    const tok = localStorage.getItem('pa233_customer_token');
+    if (tok) {
+      const mr = await fetch('/api/auth/me', { headers: { Authorization: 'Bearer ' + tok } });
+      if (mr.ok) acct = await mr.json();
+    }
+  } catch { /* guest checkout is fine */ }
+
   const subtotal = cart.reduce((acc, i) => {
     const p = byId[i.id];
     if (!p) return acc;
@@ -138,6 +148,19 @@ async function render() {
   cityEl.addEventListener('input', updateFee);
   updateFee();
 
+  /* prefill from signed-in account */
+  if (acct) {
+    const set = (id, v) => { const el = document.getElementById(id); if (el && v) el.value = v; };
+    set('co-name', acct.name);
+    set('co-phone', acct.phone);
+    set('co-email', acct.email);
+    set('co-address', acct.address);
+    set('co-city', acct.city);
+    const note = document.querySelector('.cart-summary .sum-note');
+    if (note) note.innerHTML = `${PA.icons.user}<span>Signed in as <b style="color:var(--text)">${esc(acct.email)}</b> — your order will be linked to your account.</span>`;
+    updateFee();
+  }
+
   /* payment method selection */
   document.querySelectorAll('.pay-option').forEach(opt => opt.addEventListener('click', () => {
     document.querySelectorAll('.pay-option').forEach(o => o.classList.remove('selected'));
@@ -167,8 +190,11 @@ async function render() {
 
     const items = cart.map(i => ({ id: i.id, qty: i.qty }));
     try {
+      const headers = { 'Content-Type': 'application/json' };
+      const tok = localStorage.getItem('pa233_customer_token');
+      if (tok) headers.Authorization = 'Bearer ' + tok;
       const res = await fetch('/api/orders', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers,
         body: JSON.stringify({ items, customer: { name, phone, email, address, city }, delivery: { payment_method: pay, notes } })
       });
       const order = await res.json();

@@ -154,6 +154,11 @@ h1, h2, h3, h4 { line-height: 1.22; letter-spacing: -.01em; }
 }
 .icon-btn:hover { color: var(--blue-2); border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-dim); }
 .icon-btn svg { width: 19px; height: 19px; }
+.icon-btn.logged-in::after {
+  content: ""; position: absolute; top: 3px; right: 3px; width: 9px; height: 9px;
+  border-radius: 50%; background: var(--success); border: 2px solid var(--bg);
+  box-shadow: 0 0 8px var(--success);
+}
 .cart-count {
   position: absolute; top: -6px; right: -6px; min-width: 19px; height: 19px; padding: 0 5px;
   border-radius: 20px; background: linear-gradient(135deg, #0090e0, #21b7ff); color: #04121d;

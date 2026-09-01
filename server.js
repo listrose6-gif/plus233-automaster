@@ -13,7 +13,7 @@ const path = require('path');
 const express = require('express');
 const crypto = require('crypto');
 const db = require('./db/database');
-const { seed } = require('./db/seed');
+const { seed, hashPassword } = require('./db/seed');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -83,21 +83,34 @@ function getCategory(slug) {
 /* ---------------------------------------------------------------- */
 /*  AUTH (prototype token auth — replace with real auth in prod)     */
 /* ---------------------------------------------------------------- */
-function makeToken(user) {
-  const payload = Buffer.from(JSON.stringify({ uid: user.id, exp: Date.now() + 1000 * 60 * 60 * 12 })).toString('base64');
-  return payload + '.' + crypto.createHash('sha256').update(payload + '::pa233').digest('hex').slice(0, 16);
+function makeToken(payload) {
+  const b = Buffer.from(JSON.stringify(payload)).toString('base64');
+  return b + '.' + crypto.createHash('sha256').update(b + '::pa233').digest('hex').slice(0, 16);
 }
-function authUser(req) {
-  const h = req.headers.authorization || '';
-  const token = h.startsWith('Bearer ') ? h.slice(7) : '';
+function verifyToken(token) {
+  if (!token) return null;
   const [payload, sig] = token.split('.');
   if (!payload || !sig) return null;
   if (crypto.createHash('sha256').update(payload + '::pa233').digest('hex').slice(0, 16) !== sig) return null;
   try {
     const data = JSON.parse(Buffer.from(payload, 'base64').toString('utf8'));
     if (data.exp < Date.now()) return null;
-    return db.prepare('SELECT id, username, full_name, role FROM users WHERE id = ?').get(data.uid);
+    return data;
   } catch { return null; }
+}
+function bearerToken(req) {
+  const h = req.headers.authorization || '';
+  return h.startsWith('Bearer ') ? h.slice(7) : '';
+}
+function authUser(req) {
+  const data = verifyToken(bearerToken(req));
+  if (!data || (data.scope && data.scope !== 'admin')) return null;
+  return db.prepare('SELECT id, username, full_name, role FROM users WHERE id = ?').get(data.uid);
+}
+function authCustomer(req) {
+  const data = verifyToken(bearerToken(req));
+  if (!data || data.scope !== 'customer') return null;
+  return db.prepare('SELECT id, name, email, phone, address, city, created_at FROM customers WHERE id = ?').get(data.uid);
 }
 function requireAdmin(req, res, next) {
   const user = authUser(req);
@@ -236,14 +249,14 @@ app.post('/api/orders', (req, res) => {
       lines.push({ product: p, qty });
     }
 
-    // customer (upsert by email+phone)
-    let cust = null;
-    if (customer.email) {
-      cust = db.prepare('SELECT * FROM customers WHERE email = ? AND phone = ?').get(customer.email, customer.phone);
+    // customer: prefer signed-in account → else match by email → else create guest
+    let cust = authCustomer(req);
+    if (!cust && customer.email) {
+      cust = db.prepare('SELECT id FROM customers WHERE email = ?').get(String(customer.email).trim().toLowerCase());
     }
     if (!cust) {
       const r = db.prepare('INSERT INTO customers (name, email, phone, address, city) VALUES (?,?,?,?,?)')
-        .run(customer.name, customer.email || '', customer.phone, customer.address, customer.city);
+        .run(customer.name, String(customer.email || '').trim().toLowerCase(), customer.phone, customer.address, customer.city);
       cust = { id: r.lastInsertRowid };
     }
 
@@ -310,7 +323,54 @@ app.post('/api/admin/login', (req, res) => {
   const [salt, hash] = user.password_hash.split(':');
   const test = crypto.createHash('sha256').update(salt + password).digest('hex');
   if (test !== hash) return res.status(401).json({ error: 'Invalid credentials' });
-  res.json({ token: makeToken(user), user: { id: user.id, username: user.username, full_name: user.full_name, role: user.role } });
+  res.json({ token: makeToken({ uid: user.id, scope: 'admin', exp: Date.now() + 1000 * 60 * 60 * 12 }), user: { id: user.id, username: user.username, full_name: user.full_name, role: user.role } });
+});
+
+/* ---------------------------------------------------------------- */
+/*  CUSTOMER ACCOUNTS (registration / sign-in / profile / orders)    */
+/* ---------------------------------------------------------------- */
+app.post('/api/auth/register', (req, res) => {
+  const { name, email, password, phone } = req.body || {};
+  if (!name || !email || !password) return res.status(400).json({ error: 'Name, email and password are required' });
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(400).json({ error: 'Enter a valid email address' });
+  if (String(password).length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  const em = String(email).trim().toLowerCase();
+  const exists = db.prepare('SELECT id FROM customers WHERE email = ?').get(em);
+  if (exists) return res.status(409).json({ error: 'An account with this email already exists. Try signing in.' });
+  const r = db.prepare('INSERT INTO customers (name, email, phone, address, city, password_hash) VALUES (?,?,?,?,?,?)')
+    .run(String(name).trim(), em, String(phone || '').trim(), '', '', hashPassword(String(password)));
+  const user = db.prepare('SELECT id, name, email, phone, address, city, created_at FROM customers WHERE id = ?').get(r.lastInsertRowid);
+  res.status(201).json({ token: makeToken({ uid: user.id, scope: 'customer', exp: Date.now() + 1000 * 60 * 60 * 24 * 7 }), user });
+});
+
+app.post('/api/auth/login', (req, res) => {
+  const { email, password } = req.body || {};
+  const em = String(email || '').trim().toLowerCase();
+  const cust = db.prepare('SELECT * FROM customers WHERE email = ?').get(em);
+  if (!cust || !cust.password_hash) return res.status(401).json({ error: 'Invalid email or password' });
+  const [salt, hash] = cust.password_hash.split(':');
+  if (crypto.createHash('sha256').update(salt + String(password || '')).digest('hex') !== hash) {
+    return res.status(401).json({ error: 'Invalid email or password' });
+  }
+  const user = { id: cust.id, name: cust.name, email: cust.email, phone: cust.phone, address: cust.address, city: cust.city, created_at: cust.created_at };
+  res.json({ token: makeToken({ uid: cust.id, scope: 'customer', exp: Date.now() + 1000 * 60 * 60 * 24 * 7 }), user });
+});
+
+app.get('/api/auth/me', (req, res) => {
+  const cust = authCustomer(req);
+  if (!cust) return res.status(401).json({ error: 'Not signed in' });
+  cust.orders = db.prepare(`SELECT o.*, (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) item_count
+    FROM orders o WHERE o.customer_id = ? ORDER BY o.id DESC LIMIT 20`).all(cust.id);
+  res.json(cust);
+});
+
+app.put('/api/auth/me', (req, res) => {
+  const cust = authCustomer(req);
+  if (!cust) return res.status(401).json({ error: 'Not signed in' });
+  const { name, phone, address, city } = req.body || {};
+  db.prepare('UPDATE customers SET name=?, phone=?, address=?, city=? WHERE id=?')
+    .run(String(name || cust.name).trim(), String(phone || cust.phone).trim(), String(address || cust.address).trim(), String(city || cust.city).trim(), cust.id);
+  res.json(db.prepare('SELECT id, name, email, phone, address, city, created_at FROM customers WHERE id = ?').get(cust.id));
 });
 
 app.get('/api/admin/stats', requireAdmin, (req, res) => {
@@ -459,13 +519,14 @@ app.put('/api/admin/orders/:id/status', requireAdmin, (req, res) => {
 /* ---- customers ---- */
 app.get('/api/admin/customers', requireAdmin, (req, res) => {
   const rows = db.prepare(`
-    SELECT c.*, (SELECT COUNT(*) FROM orders o WHERE o.customer_id = c.id) order_count,
+    SELECT c.id, c.name, c.email, c.phone, c.address, c.city, c.created_at,
+           (SELECT COUNT(*) FROM orders o WHERE o.customer_id = c.id) order_count,
            (SELECT COALESCE(SUM(o.total_ghs),0) FROM orders o WHERE o.customer_id = c.id) total_spent
     FROM customers c ORDER BY c.id DESC LIMIT 200`).all();
   res.json(rows);
 });
 app.get('/api/admin/customers/:id', requireAdmin, (req, res) => {
-  const c = db.prepare('SELECT * FROM customers WHERE id = ?').get(+req.params.id);
+  const c = db.prepare('SELECT id, name, email, phone, address, city, created_at FROM customers WHERE id = ?').get(+req.params.id);
   if (!c) return res.status(404).json({ error: 'Customer not found' });
   c.orders = db.prepare('SELECT * FROM orders WHERE customer_id = ? ORDER BY id DESC').all(c.id);
   res.json(c);

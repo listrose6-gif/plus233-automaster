@@ -139,4 +139,16 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 `);
 
+// ============ migrations ============
+// v2: customer accounts (registration/login)
+const custCols = db.prepare('PRAGMA table_info(customers)').all().map(c => c.name);
+if (!custCols.includes('password_hash')) {
+  db.exec("ALTER TABLE customers ADD COLUMN password_hash TEXT DEFAULT ''");
+}
+try {
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_email ON customers(email) WHERE email != ''`);
+} catch (e) {
+  console.warn('customer email index:', e.message);
+}
+
 module.exports = db;
