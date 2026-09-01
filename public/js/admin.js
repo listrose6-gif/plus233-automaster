@@ -226,7 +226,13 @@ async function vProducts(box) {
     </div>`;
 
   document.getElementById('p-q').addEventListener('input', debounce(() => {
-    state.products.q = document.getElementById('p-q').value; state.products.page = 1; vProducts(box);
+    const el = document.getElementById('p-q');
+    const caret = (typeof el.selectionStart === 'number') ? el.selectionStart : el.value.length;
+    state.products.q = el.value; state.products.page = 1;
+    vProducts(box).then(() => {
+      const n = document.getElementById('p-q');
+      n.focus(); n.setSelectionRange(caret, caret);
+    });
   }, 350));
   document.getElementById('p-cat').addEventListener('change', e => { state.products.category = e.target.value; state.products.page = 1; vProducts(box); });
   document.getElementById('p-add').addEventListener('click', () => openProductModal(null));
@@ -397,7 +403,13 @@ async function vOrders(box) {
 
   document.getElementById('o-status').addEventListener('change', e => { state.orders.status = e.target.value; state.orders.page = 1; vOrders(box); });
   document.getElementById('o-q').addEventListener('input', debounce(() => {
-    state.orders.q = document.getElementById('o-q').value; state.orders.page = 1; vOrders(box);
+    const el = document.getElementById('o-q');
+    const caret = (typeof el.selectionStart === 'number') ? el.selectionStart : el.value.length;
+    state.orders.q = el.value; state.orders.page = 1;
+    vOrders(box).then(() => {
+      const n = document.getElementById('o-q');
+      n.focus(); n.setSelectionRange(caret, caret);
+    });
   }, 350));
   document.getElementById('o-prev').addEventListener('click', () => { state.orders.page--; vOrders(box); });
   document.getElementById('o-next').addEventListener('click', () => { state.orders.page++; vOrders(box); });
