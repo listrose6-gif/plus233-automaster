@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shop — PLUS 233 AUTOMASTER</title>
+  <meta name="description" content="Shop genuine automotive parts, oils and accessories online — spark plugs, filters, brake pads, ball joints and more. Nationwide delivery from Accra.">
+  <link rel="icon" href="/images/logo.png" type="image/png">
+  <link rel="stylesheet" href="/css/main.css">
+</head>
+<body data-active="/shop.html">
+  <div class="bg-decor"></div>
+  <header id="site-header"></header>
+
+  <main>
+    <section class="page-hero">
+      <div class="container">
+        <nav class="breadcrumb"><a href="/">Home</a> › <span id="bc-crumb">Shop</span></nav>
+        <h1 id="page-title">Shop All Products</h1>
+        <p id="page-sub">Genuine parts with real-time stock, prices in Ghana Cedis and instant vehicle compatibility checks.</p>
+      </div>
+    </section>
+
+    <section class="section" style="padding-top:0">
+      <div class="container">
+        <div class="toolbar">
+          <form class="search-inline" id="shop-search-form">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
+            <input id="shop-q" type="text" placeholder="Search products, part numbers, brands…">
+          </form>
+          <select id="shop-sort" aria-label="Sort products">
+            <option value="featured">Sort: Featured</option>
+            <option value="new">Newest first</option>
+            <option value="price-asc">Price: Low → High</option>
+            <option value="price-desc">Price: High → Low</option>
+            <option value="name">Name A–Z</option>
+          </select>
+          <button class="btn btn-outline btn-sm" id="filter-toggle">Filters</button>
+          <span class="result-count" id="result-count"></span>
+        </div>
+
+        <div class="shop-layout">
+          <aside class="shop-sidebar" id="shop-sidebar">
+            <div class="side-block">
+              <h3>Categories</h3>
+              <ul class="side-links" id="side-cats"></ul>
+            </div>
+            <div class="side-block" id="brand-block" style="display:none">
+              <h3>Brands</h3>
+              <div class="brand-chips" id="brand-chips"></div>
+            </div>
+            <div class="side-block">
+              <h3>Stock</h3>
+              <label class="brand-chips" style="gap:8px;display:flex;align-items:center;cursor:pointer;color:var(--text-2);font-size:.88rem">
+                <input type="checkbox" id="in-stock-only" style="accent-color:var(--blue);width:16px;height:16px"> In stock only
+              </label>
+            </div>
+          </aside>
+          <div>
+            <div class="products-grid" id="products-grid"></div>
+            <div class="pagination" id="pagination"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer id="site-footer"></footer>
+  <script src="/js/components.js"></script>
+  <script src="/js/shop.js"></script>
+</body>
+</html>

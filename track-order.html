@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Track My Order — PLUS 233 AUTOMASTER</title>
+  <meta name="description" content="Track your PLUS 233 AUTOMASTER order — enter your order number to see its status.">
+  <link rel="icon" href="/images/logo.png" type="image/png">
+  <link rel="stylesheet" href="/css/main.css">
+</head>
+<body data-active="/track-order.html">
+  <div class="bg-decor"></div>
+  <header id="site-header"></header>
+
+  <main>
+    <section class="page-hero">
+      <div class="container">
+        <nav class="breadcrumb"><a href="/">Home</a> › <span>Track My Order</span></nav>
+        <h1>Track My Order</h1>
+        <p>Enter the order number from your confirmation (e.g. PA-20260830-12345).</p>
+      </div>
+    </section>
+
+    <section class="section" style="padding-top:0">
+      <div class="container" style="max-width:720px">
+        <form class="finder-card" id="track-form">
+          <div class="finder-head">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 4h14v13H1zM15 9h4l4 4v4h-8"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="19" r="2"/></svg>
+            <div>
+              <h2>Track your delivery</h2>
+              <p>Status updates: Pending → Confirmed → Processing → Out for Delivery → Delivered</p>
+            </div>
+          </div>
+          <div class="finder-fields" style="grid-template-columns:1fr auto">
+            <div class="field">
+              <label for="tr-order">Order Number</label>
+              <input id="tr-order" type="text" placeholder="PA-20260830-12345" style="font-family:ui-monospace,Consolas,monospace">
+            </div>
+            <button class="btn btn-primary" type="submit" style="align-self:end">Track</button>
+          </div>
+        </form>
+        <div id="track-result" style="margin-top:24px"></div>
+      </div>
+    </section>
+  </main>
+
+  <footer id="site-footer"></footer>
+  <script src="/js/components.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const qs = new URLSearchParams(location.search);
+      const input = document.getElementById('tr-order');
+      const box = document.getElementById('track-result');
+      if (qs.get('order')) input.value = qs.get('order');
+
+      const STATUS = {
+        'Pending': ['Order received — awaiting confirmation call', 'var(--warn)'],
+        'Confirmed': ['Confirmed — being prepared', 'var(--blue-2)'],
+        'Processing': ['Processing — parts being packed', 'var(--blue-2)'],
+        'Out for Delivery': ['Out for delivery 🚚', 'var(--blue-2)'],
+        'Delivered': ['Delivered — enjoy your parts!', 'var(--success)'],
+        'Completed': ['Completed — thank you!', 'var(--success)'],
+        'Cancelled': ['Cancelled — contact us if this is unexpected', 'var(--danger)']
+      };
+
+      async function track(orderNum) {
+        box.innerHTML = '<p style="color:var(--muted)">Looking up order…</p>';
+        const r = await fetch('/api/orders/' + encodeURIComponent(orderNum));
+        if (!r.ok) {
+          box.innerHTML = `<div class="results-note" style="border-color:rgba(255,84,112,.4);color:var(--danger);background:var(--danger-dim)">${PA.icons.alert}<div><b>Order not found.</b> Check the number and try again — or contact us for help.</div></div>`;
+          return;
+        }
+        const o = await r.json();
+        const st = STATUS[o.status] || [o.status, 'var(--text-2)'];
+        box.innerHTML = `
+          <div class="form-card">
+            <h3>Order ${PA.esc(o.order_number)}</h3>
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px;flex-wrap:wrap">
+              <span class="tag" style="background:var(--blue-dim);color:var(--blue-2);font-size:.8rem;padding:6px 14px">${PA.esc(o.status)}</span>
+              <span class="tag tag-gray" style="font-size:.8rem;padding:6px 14px">${PA.esc(o.payment_method)} · ${PA.esc(o.payment_status)}</span>
+              <span style="color:var(--muted);font-size:.85rem">Placed ${PA.esc(String(o.created_at).replace('T', ' ').slice(0, 16))}</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px;background:var(--bg-2);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:16px">
+              ${PA.icons.truck}
+              <div><b style="color:${st[1]}">${st[0]}</b><div style="color:var(--muted);font-size:.84rem">Delivery to ${PA.esc(o.address)}, ${PA.esc(o.city)}</div></div>
+            </div>
+            <div style="display:grid;gap:8px">
+              ${o.items.map(it => `
+                <div style="display:flex;justify-content:space-between;gap:10px;font-size:.88rem;padding:8px 0;border-bottom:1px solid rgba(34,42,58,.5)">
+                  <span>${PA.esc(it.product_name)} <span style="color:var(--muted)">× ${it.qty}</span></span>
+                  <b>${PA.fmt(it.unit_price_ghs * it.qty)}</b>
+                </div>`).join('')}
+            </div>
+            <div class="sum-row total" style="margin-top:12px"><span>Total</span><span>${PA.fmt(o.total_ghs)}</span></div>
+            <a class="btn btn-outline btn-sm" href="/contact.html" style="margin-top:14px">Question about this order? Contact us</a>
+          </div>`;
+      }
+
+      document.getElementById('track-form').addEventListener('submit', e => {
+        e.preventDefault();
+        const v = input.value.trim();
+        if (!v) { PA.toast('Enter your order number', 'error'); return; }
+        track(v);
+      });
+      if (qs.get('order')) track(qs.get('order'));
+    });
+  </script>
+</body>
+</html>

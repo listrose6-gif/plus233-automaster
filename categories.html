@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Categories — PLUS 233 AUTOMASTER</title>
+  <meta name="description" content="Browse all PLUS 233 AUTOMASTER categories — spark plugs, ignition coils, filters, brake parts, lubricants and more.">
+  <link rel="icon" href="/images/logo.png" type="image/png">
+  <link rel="stylesheet" href="/css/main.css">
+</head>
+<body data-active="/categories.html">
+  <div class="bg-decor"></div>
+  <header id="site-header"></header>
+
+  <main>
+    <section class="page-hero">
+      <div class="container">
+        <nav class="breadcrumb"><a href="/">Home</a> › <span>Categories</span></nav>
+        <h1>Shop by Category</h1>
+        <p>Every genuine part category we stock — from ignition and filtration to suspension, fluids and workshop chemicals.</p>
+      </div>
+    </section>
+
+    <section class="section" style="padding-top:0">
+      <div class="container">
+        <div class="cat-grid" id="cat-grid" style="grid-template-columns:repeat(auto-fill,minmax(210px,1fr))"></div>
+      </div>
+    </section>
+  </main>
+
+  <footer id="site-footer"></footer>
+  <script src="/js/components.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', async () => {
+      const grid = document.getElementById('cat-grid');
+      const r = await fetch('/api/categories');
+      const cats = await r.json();
+      grid.innerHTML = cats.map(c => `
+        <a class="cat-card" href="/shop.html?category=${encodeURIComponent(c.slug)}">
+          <img src="${c.image || '/images/placeholder-cat.jpg'}" alt="${PA.esc(c.name)}" loading="lazy">
+          <div class="cat-body">
+            <div class="cat-name">${PA.esc(c.name)}</div>
+            <div class="cat-count">${PA.icons.arrowRight}<span>${c.product_count || 0} products</span></div>
+          </div>
+        </a>`).join('');
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>My Account — PLUS 233 AUTOMASTER</title>
+  <meta name="description" content="Your PLUS 233 AUTOMASTER account — sign in, track orders, manage details.">
+  <link rel="icon" href="/images/logo.png" type="image/png">
+  <link rel="stylesheet" href="/css/main.css">
+</head>
+<body data-active="/account.html">
+  <div class="bg-decor"></div>
+  <header id="site-header"></header>
+
+  <main>
+    <section class="page-hero">
+      <div class="container">
+        <nav class="breadcrumb"><a href="/">Home</a> › <span>My Account</span></nav>
+        <h1>My Account</h1>
+        <p>Sign in to manage your orders and details. New here? You can order as a guest — no account needed.</p>
+      </div>
+    </section>
+
+    <section class="section" style="padding-top:0">
+      <div class="container">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px">
+          <div class="form-card">
+            <h3>Sign In</h3>
+            <form id="signin-form" class="form-grid" style="grid-template-columns:1fr">
+              <div class="field">
+                <label for="acc-email">Email or Phone</label>
+                <input id="acc-email" type="text" placeholder="you@example.com or 024…">
+              </div>
+              <div class="field">
+                <label for="acc-pass">Password</label>
+                <input id="acc-pass" type="password" placeholder="••••••••">
+              </div>
+              <div>
+                <button class="btn btn-primary btn-block" type="submit">Sign In</button>
+              </div>
+              <p style="color:var(--muted);font-size:.8rem">Account sign-in is under construction. For now, track your orders with your <a href="/track-order.html" style="color:var(--blue-2)">order number</a> — no login needed.</p>
+            </form>
+          </div>
+
+          <div class="form-card">
+            <h3>Quick Actions</h3>
+            <div style="display:grid;gap:10px">
+              <a class="btn btn-outline" href="/track-order.html"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 4h14v13H1zM15 9h4l4 4v4h-8"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="19" r="2"/></svg> Track My Order</a>
+              <a class="btn btn-outline" href="/cart.html"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="21" r="1.6"/><circle cx="19" cy="21" r="1.6"/><path d="M2.5 3h2l2.7 12.4a2 2 0 002 1.6h9.7a2 2 0 002-1.6L22 7H6"/></svg> View My Cart</a>
+              <a class="btn btn-outline" href="/find-parts.html"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 16l1.5-4.5A2 2 0 018.4 10h7.2a2 2 0 011.9 1.5L19 16M5 16h14M5 16v2.5M19 16v2.5M6.5 12h11"/><circle cx="8" cy="18" r="1.6"/><circle cx="16" cy="18" r="1.6"/></svg> Find Parts for My Car</a>
+              <a class="btn btn-outline" href="/contact.html"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 16.9v3a2 2 0 01-2.2 2 19.8 19.8 0 01-8.6-3.1 19.5 19.5 0 01-6-6A19.8 19.8 0 012.1 4.2 2 2 0 014.1 2h3a2 2 0 012 1.7c.13.96.36 1.9.7 2.8a2 2 0 01-.45 2.1L8.1 9.9a16 16 0 006 6l1.3-1.3a2 2 0 012.1-.45c.9.34 1.84.57 2.8.7a2 2 0 011.7 2.05z"/></svg> Contact Support</a>
+            </div>
+            <p style="color:var(--muted);font-size:.8rem;margin-top:14px">Wholesale? <a href="/contact.html" style="color:var(--blue-2)">Talk to our wholesale team</a> for bulk pricing.</p>
+          </div>
+
+          <div class="form-card">
+            <h3>Why Create an Account?</h3>
+            <ul style="list-style:none;display:grid;gap:10px;color:var(--text-2);font-size:.9rem">
+              <li>🛒 Save your vehicles for one-tap compatibility checks</li>
+              <li>📦 Track all your orders in one place</li>
+              <li>⚡ Faster checkout with saved details</li>
+              <li>🎁 Early access to deals and restocks</li>
+            </ul>
+            <p style="color:var(--muted);font-size:.78rem;margin-top:12px">Full account features are coming soon — order as a guest today with cash on delivery.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer id="site-footer"></footer>
+  <script src="/js/components.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('signin-form').addEventListener('submit', e => {
+        e.preventDefault();
+        PA.toast('Account sign-in is coming soon. Use your order number to track orders.', 'info');
+      });
+    });
+  </script>
+</body>
+</html>

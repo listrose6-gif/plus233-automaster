@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Your Cart — PLUS 233 AUTOMASTER</title>
+  <meta name="description" content="Review your selected automotive parts and proceed to checkout.">
+  <link rel="icon" href="/images/logo.png" type="image/png">
+  <link rel="stylesheet" href="/css/main.css">
+</head>
+<body data-active="/cart.html">
+  <div class="bg-decor"></div>
+  <header id="site-header"></header>
+
+  <main>
+    <section class="page-hero">
+      <div class="container">
+        <nav class="breadcrumb"><a href="/">Home</a> › <a href="/shop.html">Shop</a> › <span>Shopping Cart</span></nav>
+        <h1>Your Shopping Cart</h1>
+        <p>Review your parts, adjust quantities and proceed to a secure checkout.</p>
+      </div>
+    </section>
+
+    <section class="section" style="padding-top:0">
+      <div class="container">
+        <div id="cart-content"></div>
+        <div class="cart-suggest" id="cart-suggest" style="display:none">
+          <div class="section-head">
+            <div>
+              <span class="sec-eyebrow">While you're here</span>
+              <h2 class="sec-title">You Might Also Need</h2>
+            </div>
+          </div>
+          <div class="products-grid" id="suggest-grid"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer id="site-footer"></footer>
+  <script src="/js/components.js"></script>
+  <script src="/js/cart.js"></script>
+</body>
+</html>

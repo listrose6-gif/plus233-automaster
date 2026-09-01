@@ -1,0 +1,14 @@
+{
+  "name": "plus233-automaster",
+  "version": "1.0.0",
+  "description": "PLUS 233 AUTOMASTER - Ghana automotive parts e-commerce marketplace",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "seed": "node db/seed.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "better-sqlite3": "^11.3.0"
+  }
+}

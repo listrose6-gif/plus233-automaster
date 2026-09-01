@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Find Parts for My Car — PLUS 233 AUTOMASTER</title>
+  <meta name="description" content="Find compatible auto parts for your vehicle. Select make, model, year and engine to see exactly which genuine parts fit your car.">
+  <link rel="icon" href="/images/logo.png" type="image/png">
+  <link rel="stylesheet" href="/css/main.css">
+</head>
+<body data-active="/find-parts.html">
+  <div class="bg-decor"></div>
+  <header id="site-header"></header>
+
+  <main>
+    <section class="page-hero">
+      <div class="container">
+        <nav class="breadcrumb"><a href="/">Home</a> › <span>Find Parts for My Car</span></nav>
+        <h1>Find Parts For Your Vehicle</h1>
+        <p>Tell us what you drive — we'll instantly show every compatible part we stock, with real-time prices and availability.</p>
+      </div>
+    </section>
+
+    <section class="section" style="padding-top:0">
+      <div class="container">
+        <div class="finder-card">
+          <div class="finder-head">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 16l1.5-4.5A2 2 0 018.4 10h7.2a2 2 0 011.9 1.5L19 16M5 16h14M5 16v2.5M19 16v2.5M6.5 12h11"/><circle cx="8" cy="18" r="1.6"/><circle cx="16" cy="18" r="1.6"/></svg>
+            <div>
+              <h2>Select Your Vehicle</h2>
+              <p>Compatibility data covers common vehicles sold in Ghana. Can't find yours? Contact us.</p>
+            </div>
+          </div>
+          <div class="finder-fields">
+            <div class="field">
+              <label for="fp-make">Make</label>
+              <select id="fp-make"><option value="">Select Make…</option></select>
+            </div>
+            <div class="field">
+              <label for="fp-model">Model</label>
+              <select id="fp-model" disabled><option value="">Select Model…</option></select>
+            </div>
+            <div class="field">
+              <label for="fp-year">Year</label>
+              <select id="fp-year" disabled><option value="">Select Year…</option></select>
+            </div>
+            <div class="field">
+              <label for="fp-engine">Engine</label>
+              <select id="fp-engine" disabled><option value="">Any Engine</option></select>
+            </div>
+          </div>
+          <div class="finder-actions">
+            <button class="btn btn-primary" id="fp-submit" disabled>
+              <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
+              FIND COMPATIBLE PARTS
+            </button>
+            <span class="finder-hint">e.g. Toyota · Corolla · 2012 · 1.8L</span>
+          </div>
+        </div>
+
+        <div id="fp-results" style="margin-top:34px"></div>
+      </div>
+    </section>
+  </main>
+
+  <footer id="site-footer"></footer>
+  <script src="/js/components.js"></script>
+  <script src="/js/find-parts.js"></script>
+</body>
+</html>

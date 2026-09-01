@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Contact Us — PLUS 233 AUTOMASTER</title>
+  <meta name="description" content="Contact PLUS 233 AUTOMASTER — 28 Chemu Rd, Accra, Down-Right. Call, WhatsApp, email or follow us on Facebook, Instagram and TikTok.">
+  <link rel="icon" href="/images/logo.png" type="image/png">
+  <link rel="stylesheet" href="/css/main.css">
+</head>
+<body data-active="/contact.html">
+  <div class="bg-decor"></div>
+  <header id="site-header"></header>
+
+  <main>
+    <section class="page-hero">
+      <div class="container">
+        <nav class="breadcrumb"><a href="/">Home</a> › <span>Contact Us</span></nav>
+        <h1>Contact Plus 233 AutoMaster</h1>
+        <p>Can't find your part? Tell us what you drive and we'll source it for you.</p>
+      </div>
+    </section>
+
+    <section class="section" style="padding-top:0">
+      <div class="container">
+        <div class="contact-grid">
+          <div>
+            <div class="form-card" style="margin-bottom:18px">
+              <h3>Send us a message</h3>
+              <form id="contact-form" class="form-grid" novalidate>
+                <div class="field">
+                  <label for="ct-name">Your Name *</label>
+                  <input id="ct-name" type="text" placeholder="Full name" required>
+                </div>
+                <div class="field">
+                  <label for="ct-phone">Phone</label>
+                  <input id="ct-phone" type="tel" placeholder="024 000 0000">
+                </div>
+                <div class="field full">
+                  <label for="ct-email">Email</label>
+                  <input id="ct-email" type="email" placeholder="you@example.com">
+                </div>
+                <div class="field full">
+                  <label for="ct-subject">Subject</label>
+                  <input id="ct-subject" type="text" placeholder="e.g. Looking for a part for my Toyota Corolla 2012">
+                </div>
+                <div class="field full">
+                  <label for="ct-message">Message *</label>
+                  <textarea id="ct-message" placeholder="Describe the part you need — include your vehicle make, model, year and engine if possible…" required></textarea>
+                </div>
+                <div class="full">
+                  <button class="btn btn-primary" type="submit">Send Message</button>
+                </div>
+              </form>
+            </div>
+
+            <div class="contact-social">
+              <a class="social-btn" id="fb-link" href="#" target="_blank" rel="noopener" aria-label="Facebook — Plus Auto master"></a>
+              <a class="social-btn" id="ig-link" href="#" target="_blank" rel="noopener" aria-label="Instagram — PluS 233 Auto Master"></a>
+              <a class="social-btn" id="tt-link" href="#" target="_blank" rel="noopener" aria-label="TikTok — PluS 233 Auto Master"></a>
+              <a class="social-btn" id="wa-link" href="#" target="_blank" rel="noopener" aria-label="WhatsApp"></a>
+            </div>
+          </div>
+
+          <div class="contact-cards">
+            <div class="contact-card">
+              <div class="cc-icon"></div>
+              <div>
+                <b>Visit Our Store</b>
+                <p id="ct-address">28 Chemu Rd, Accra, Down-Right</p>
+                <a id="ct-maps" href="#" target="_blank" rel="noopener">Open in Google Maps →</a>
+              </div>
+            </div>
+            <div class="contact-card">
+              <div class="cc-icon"></div>
+              <div>
+                <b>Call or WhatsApp</b>
+                <p id="ct-phone-text">+233 000 000 0000</p>
+                <a id="ct-tel" href="#">Call now →</a>
+              </div>
+            </div>
+            <div class="contact-card">
+              <div class="cc-icon"></div>
+              <div>
+                <b>Email Us</b>
+                <p id="ct-email-text">sales@plus233automaster.com</p>
+                <a id="ct-mail" href="#">Send email →</a>
+              </div>
+            </div>
+            <div class="contact-card">
+              <div class="cc-icon"></div>
+              <div>
+                <b>Opening Hours</b>
+                <p id="ct-hours">Mon – Sat: 8:00 AM – 6:00 PM</p>
+              </div>
+            </div>
+            <div class="contact-card">
+              <div class="cc-icon"></div>
+              <div>
+                <b>Follow Us</b>
+                <p>Facebook: <a id="fb-name" href="#" target="_blank" rel="noopener">Plus Auto master</a></p>
+                <p>Instagram: <a id="ig-name" href="#" target="_blank" rel="noopener">PluS 233 Auto Master</a></p>
+                <p>TikTok: <a id="tt-name" href="#" target="_blank" rel="noopener">PluS 233 Auto Master</a></p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer id="site-footer"></footer>
+  <script src="/js/components.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', async () => {
+      const s = await PA.settings();
+      const ic = (i) => PA.icons[i];
+      document.querySelectorAll('.contact-card .cc-icon').forEach((el, idx) => {
+        const iconsList = ['pin', 'phone', 'mail', 'clock', 'facebook'];
+        el.innerHTML = ic(iconsList[idx] || 'pin');
+      });
+      document.getElementById('fb-link').innerHTML = ic('facebook');
+      document.getElementById('ig-link').innerHTML = ic('instagram');
+      document.getElementById('tt-link').innerHTML = ic('tiktok');
+      document.getElementById('wa-link').innerHTML = ic('phone');
+
+      document.getElementById('fb-link').href = s.facebook_url; document.getElementById('fb-name').href = s.facebook_url;
+      document.getElementById('ig-link').href = s.instagram_url; document.getElementById('ig-name').href = s.instagram_url;
+      document.getElementById('tt-link').href = s.tiktok_url; document.getElementById('tt-name').href = s.tiktok_url;
+
+      if (s.address) document.getElementById('ct-address').textContent = s.address;
+      if (s.maps_url) document.getElementById('ct-maps').href = s.maps_url;
+      if (s.phone) {
+        document.getElementById('ct-phone-text').textContent = s.phone;
+        document.getElementById('ct-tel').href = 'tel:' + s.phone;
+        document.getElementById('wa-link').href = 'https://wa.me/' + s.phone.replace(/[^0-9]/g, '');
+      }
+      if (s.email) {
+        document.getElementById('ct-email-text').textContent = s.email;
+        document.getElementById('ct-mail').href = 'mailto:' + s.email;
+      }
+      if (s.hours) document.getElementById('ct-hours').textContent = s.hours;
+
+      document.getElementById('contact-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const name = document.getElementById('ct-name').value.trim();
+        const message = document.getElementById('ct-message').value.trim();
+        if (!name || !message) { PA.toast('Please enter your name and message', 'error'); return; }
+        const res = await fetch('/api/contact', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name,
+            phone: document.getElementById('ct-phone').value.trim(),
+            email: document.getElementById('ct-email').value.trim(),
+            subject: document.getElementById('ct-subject').value.trim(),
+            message
+          })
+        });
+        if (res.ok) {
+          PA.toast('Message sent! We\'ll get back to you shortly.', 'success');
+          e.target.reset();
+        } else PA.toast('Could not send message. Please call us instead.', 'error');
+      });
+    });
+  </script>
+</body>
+</html>
