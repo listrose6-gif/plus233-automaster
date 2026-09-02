@@ -51,7 +51,7 @@ async function load() {
       <div class="pd-buy-row">
         <div class="qty-stepper">
           <button class="pd-minus" type="button">−</button>
-          <input id="pd-qty" type="number" value="1" min="1" max="${Math.max(1, p.stock_qty)}" aria-label="Quantity">
+          <input id="pd-qty" type="number" value="1" min="1" max="99" aria-label="Quantity">
           <button class="pd-plus" type="button">+</button>
         </div>
         <button class="btn btn-outline" id="pd-add" ${out ? 'disabled' : ''}>${PA.icons.cart} Add to Cart</button>
@@ -63,7 +63,7 @@ async function load() {
 
   const qty = document.getElementById('pd-qty');
   document.querySelector('.pd-minus').addEventListener('click', () => qty.value = Math.max(1, (parseInt(qty.value) || 1) - 1));
-  document.querySelector('.pd-plus').addEventListener('click', () => qty.value = Math.min(p.stock_qty, (parseInt(qty.value) || 1) + 1));
+  document.querySelector('.pd-plus').addEventListener('click', () => qty.value = Math.min(99, (parseInt(qty.value) || 1) + 1));
 
   document.getElementById('pd-add').addEventListener('click', () => {
     PA.addToCart(p.id, parseInt(qty.value) || 1, { name: p.name, price: p.price_ghs, image: p.image_url, part_number: p.part_number });

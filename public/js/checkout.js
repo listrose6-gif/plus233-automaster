@@ -105,7 +105,7 @@ async function render() {
         ${cart.map(i => {
           const p = byId[i.id];
           if (!p) return '';
-          const out = p.stock_qty <= 0;
+          const out = p.stock_status === 'out';
           return `
           <div class="co-item">
             <img src="${p.image_url || '/images/placeholder-part.jpg'}" alt="">

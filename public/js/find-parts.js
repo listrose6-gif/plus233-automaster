@@ -25,10 +25,9 @@ async function loadModels(make) {
 function loadYears(model) {
   const yearEl = document.getElementById('fp-year');
   const engEl = document.getElementById('fp-engine');
-  const engSel = document.getElementById('fp-engine');
-  engEl.disabled = !model; engSel.disabled = !model;
+  engEl.disabled = true;
   engEl.innerHTML = '<option value="">Any Engine</option>';
-  if (!model) { yearEl.innerHTML = '<option value="">Select Year…</option>'; return; }
+  if (!model) { yearEl.disabled = true; yearEl.innerHTML = '<option value="">Select Year…</option>'; return; }
   const modelEl = document.getElementById('fp-model');
   const list = JSON.parse(modelEl.dataset.years || '[]');
   const info = list.find(m => m.model === model);
@@ -37,11 +36,13 @@ function loadYears(model) {
   const years = [];
   for (let y = end; y >= start; y--) years.push(y);
   yearEl.innerHTML = '<option value="">Select Year…</option>' + years.map(y => `<option value="${y}">${y}</option>`).join('');
+  yearEl.disabled = false; // year is the next step — engine waits for the year
 }
-async function loadEngines(make, model) {
+async function loadEngines(make, model, year) {
   const engEl = document.getElementById('fp-engine');
   if (!make || !model) return;
-  const r = await fetch(`/api/vehicles/engines?make=${encodeURIComponent(make)}&model=${encodeURIComponent(model)}`);
+  if (!year) { engEl.disabled = true; engEl.innerHTML = '<option value="">Any Engine</option>'; return; }
+  const r = await fetch(`/api/vehicles/engines?make=${encodeURIComponent(make)}&model=${encodeURIComponent(model)}&year=${encodeURIComponent(year)}`);
   const engines = await r.json();
   engEl.innerHTML = '<option value="">Any Engine</option>' + engines.map(e => `<option value="${esc(e)}">${esc(e)}</option>`).join('');
   engEl.disabled = false;
@@ -87,8 +88,8 @@ function init() {
   const engEl = document.getElementById('fp-engine');
 
   makeEl.addEventListener('change', () => { fp.make = makeEl.value; fp.model = fp.year = fp.engine = ''; loadModels(fp.make); updateSubmit(); });
-  modelEl.addEventListener('change', () => { fp.model = modelEl.value; fp.year = fp.engine = ''; loadYears(fp.model); loadEngines(fp.make, fp.model); updateSubmit(); });
-  yearEl.addEventListener('change', () => { fp.year = yearEl.value; updateSubmit(); });
+  modelEl.addEventListener('change', () => { fp.model = modelEl.value; fp.year = fp.engine = ''; loadYears(fp.model); updateSubmit(); });
+  yearEl.addEventListener('change', () => { fp.year = yearEl.value; fp.engine = ''; loadEngines(fp.make, fp.model, fp.year); updateSubmit(); });
   engEl.addEventListener('change', () => { fp.engine = engEl.value; });
 
   document.getElementById('fp-submit').addEventListener('click', () => {
@@ -101,8 +102,9 @@ function init() {
       makeEl.value = qs.get('make'); fp.make = qs.get('make');
       await loadModels(fp.make);
       modelEl.value = qs.get('model'); fp.model = qs.get('model');
-      loadYears(fp.model); await loadEngines(fp.make, fp.model);
+      loadYears(fp.model);
       yearEl.value = qs.get('year'); fp.year = qs.get('year');
+      await loadEngines(fp.make, fp.model, fp.year);
       if (qs.get('engine')) { engEl.value = qs.get('engine'); fp.engine = qs.get('engine'); }
       updateSubmit();
       search();

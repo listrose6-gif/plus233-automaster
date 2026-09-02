@@ -113,11 +113,11 @@ const PA = (() => {
   };
 
   /* ---------- stock helpers ---------- */
-  const stockLabel = (p) => p.stock_status === 'out' ? 'Out of Stock' : (p.stock_status === 'low' ? `Only ${p.stock_qty} left` : 'In Stock');
+  const stockLabel = (p) => p.stock_status === 'out' ? 'Out of Stock' : (p.stock_status === 'low' ? 'Limited Stock' : 'In Stock');
   const stockPill = (p) => {
-    if (p.stock_status === 'out') return '<span class="stock-pill stock-out"><span class="dot"></span>Out of stock</span>';
-    if (p.stock_status === 'low') return `<span class="stock-pill stock-low"><span class="dot"></span>Only ${p.stock_qty} left</span>`;
-    return '<span class="stock-pill stock-in"><span class="dot"></span>In stock</span>';
+    if (p.stock_status === 'out') return '<span class="stock-pill stock-out"><span class="dot"></span>Out of Stock</span>';
+    if (p.stock_status === 'low') return '<span class="stock-pill stock-low"><span class="dot"></span>Limited Stock</span>';
+    return '<span class="stock-pill stock-in"><span class="dot"></span>In Stock</span>';
   };
   const compatSummary = (p) => {
     if (!p.compatibility || !p.compatibility.length) return '';
@@ -158,7 +158,7 @@ const PA = (() => {
         <div class="pcard-actions">
           <div class="qty-stepper">
             <button class="q-minus" data-id="${p.id}" type="button">−</button>
-            <input class="q-input" data-id="${p.id}" type="number" value="1" min="1" max="${Math.max(1, p.stock_qty)}" aria-label="Quantity">
+            <input class="q-input" data-id="${p.id}" type="number" value="1" min="1" max="99" aria-label="Quantity">
             <button class="q-plus" data-id="${p.id}" type="button">+</button>
           </div>
           <button class="add-cart-btn" data-add="${p.id}" ${out ? 'disabled' : ''} type="button">${icons.cart} Add</button>

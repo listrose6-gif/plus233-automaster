@@ -622,9 +622,9 @@ async function vVehicles(box) {
 /* ================= SETTINGS ================= */
 async function vSettings(box) {
   const s = await api.get('/api/admin/settings');
-  const F = (key, label, ph, type = 'text') => `
+  const F = (key, label, ph, type = 'text', def = '') => `
     <div class="field"><label>${label}</label>
-      <input id="s-${key}" type="${type}" value="${esc(s[key] || '')}" placeholder="${esc(ph || '')}"></div>`;
+      <input id="s-${key}" type="${type}" value="${esc(s[key] || def)}" placeholder="${esc(ph || '')}"></div>`;
   box.innerHTML = `
     <div class="admin-panel">
       <h2>Store Settings</h2>
@@ -645,7 +645,9 @@ async function vSettings(box) {
         ${F('delivery_fee_accra', 'Delivery Fee — Accra (GH₵)', '40', 'number')}
         ${F('delivery_fee_nationwide', 'Delivery Fee — Nationwide (GH₵)', '90', 'number')}
         ${F('free_delivery_over', 'Free Delivery Over (GH₵)', '1500', 'number')}
+        ${F('low_stock_threshold', 'Customer “Limited Stock” label at or below (units)', '10', 'number', '10')}
       </div>
+      <p class="t-muted" style="margin-top:8px;font-size:.8rem">Customers only see In Stock / Limited Stock / Out of Stock labels — never quantities. The number above sets when “Limited Stock” appears (e.g. 10 = items with 10 or fewer remaining show Limited Stock).</p>
       <div style="display:flex;justify-content:flex-end;margin-top:16px">
         <button class="btn btn-primary" id="s-save">Save Settings</button>
       </div>
@@ -653,7 +655,7 @@ async function vSettings(box) {
   document.getElementById('s-save').addEventListener('click', async () => {
     const keys = ['site_name', 'motto', 'phone', 'email', 'address', 'hours', 'maps_url',
       'facebook_url', 'facebook_label', 'instagram_url', 'instagram_label', 'tiktok_url', 'tiktok_label',
-      'delivery_fee_accra', 'delivery_fee_nationwide', 'free_delivery_over'];
+      'delivery_fee_accra', 'delivery_fee_nationwide', 'free_delivery_over', 'low_stock_threshold'];
     const body = {};
     keys.forEach(k => { const el = document.getElementById('s-' + k); if (el) body[k] = el.value; });
     await api.put('/api/admin/settings', body);

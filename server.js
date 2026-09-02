@@ -35,6 +35,14 @@ const settingsAll = async () => {
   return Object.fromEntries(rows.map(r => [r.key, r.value]));
 };
 
+const DEFAULT_LOW_STOCK = 10;
+async function lowStockThreshold() {
+  const r = await db.get('SELECT value FROM settings WHERE key = ?', 'low_stock_threshold');
+  const n = parseInt(r && r.value, 10);
+  return Number.isFinite(n) && n >= 0 ? n : DEFAULT_LOW_STOCK;
+}
+
+/* Admin serializer — exact stock numbers (admin dashboard only). */
 async function productRow(p, withCompat = false) {
   const row = { ...p };
   row.in_stock = p.stock_qty > 0;
@@ -44,7 +52,22 @@ async function productRow(p, withCompat = false) {
       'SELECT make, model, year_start, year_end, engine FROM product_compatibility WHERE product_id = ? ORDER BY make, model', p.id
     );
   }
+  return row;
+}
+
+/* Customer serializer — never exposes stock quantities, only status labels.
+   'low' (Limited Stock) uses the global configurable threshold. */
+async function publicProduct(p, thr, withCompat = false) {
+  const row = { ...p };
+  delete row.stock_qty;
   delete row.low_stock_at;
+  row.in_stock = p.stock_qty > 0;
+  row.stock_status = p.stock_qty <= 0 ? 'out' : (p.stock_qty <= thr ? 'low' : 'in');
+  if (withCompat) {
+    row.compatibility = await db.q(
+      'SELECT make, model, year_start, year_end, engine FROM product_compatibility WHERE product_id = ? ORDER BY make, model', p.id
+    );
+  }
   return row;
 }
 
@@ -109,12 +132,13 @@ app.get('/api/products', async (req, res) => {
   const { q, category, brand, featured, sort, page = 1, per_page = 12, ids, in_stock } = req.query;
   const where = ['p.active = 1'];
   const params = {};
+  const thr = await lowStockThreshold();
 
   if (ids) {
     const list = String(ids).split(',').map(Number).filter(Boolean);
     if (!list.length) return res.json({ items: [], total: 0, page: 1, pages: 0 });
     const items = await db.q(`SELECT * FROM products WHERE id IN (${list.map(() => '?').join(',')})`, list);
-    return res.json({ items: await Promise.all(items.map(p => productRow(p))), total: items.length, page: 1, pages: 1 });
+    return res.json({ items: await Promise.all(items.map(p => publicProduct(p, thr))), total: items.length, page: 1, pages: 1 });
   }
   if (q) { where.push('(p.name LIKE @q OR p.part_number LIKE @q OR p.brand LIKE @q OR p.description LIKE @q)'); params.q = `%${q}%`; }
   if (category) {
@@ -142,7 +166,7 @@ app.get('/api/products', async (req, res) => {
   const brands = await db.q(`SELECT DISTINCT p.brand FROM products p WHERE ${where.join(' AND ')} ORDER BY p.brand`, params);
 
   res.json({
-    items: await Promise.all(rows.map(r => productRow(r))),
+    items: await Promise.all(rows.map(r => publicProduct(r, thr))),
     total, page: p, pages: Math.max(1, Math.ceil(total / pp)),
     category: category ? await getCategory(category) : null,
     brands: brands.map(b => b.brand)
@@ -152,10 +176,11 @@ app.get('/api/products', async (req, res) => {
 app.get('/api/products/:id', async (req, res) => {
   const p = await db.get('SELECT * FROM products WHERE id = ? AND active = 1', +req.params.id);
   if (!p) return res.status(404).json({ error: 'Product not found' });
-  const row = await productRow(p, true);
+  const thr = await lowStockThreshold();
+  const row = await publicProduct(p, thr, true);
   row.category = await db.get('SELECT * FROM categories WHERE id = ?', p.category_id);
   const rel = await db.q('SELECT * FROM products WHERE category_id = ? AND id != ? AND active = 1 ORDER BY featured DESC, id LIMIT 4', p.category_id, p.id);
-  row.related = await Promise.all(rel.map(r => productRow(r)));
+  row.related = await Promise.all(rel.map(r => publicProduct(r, thr)));
   res.json(row);
 });
 
@@ -166,12 +191,18 @@ app.get('/api/vehicles/makes', async (req, res) => {
 app.get('/api/vehicles/models', async (req, res) => {
   const { make } = req.query;
   if (!make) return res.status(400).json({ error: 'make required' });
-  res.json(await db.q('SELECT DISTINCT model, year_start, year_end FROM vehicles WHERE make = ? ORDER BY model', make));
+  res.json(await db.q('SELECT model, MIN(year_start) AS year_start, MAX(year_end) AS year_end FROM vehicles WHERE make = ? GROUP BY model ORDER BY model', make));
 });
 app.get('/api/vehicles/engines', async (req, res) => {
-  const { make, model } = req.query;
+  const { make, model, year } = req.query;
   if (!make || !model) return res.status(400).json({ error: 'make and model required' });
-  const rows = await db.q('SELECT engines FROM vehicles WHERE make = ? AND model = ?', make, model);
+  let rows;
+  if (year && parseInt(year)) {
+    // engines for the generation that covers this model year
+    rows = await db.q('SELECT engines FROM vehicles WHERE make = ? AND model = ? AND ? BETWEEN year_start AND year_end', make, model, +year);
+  } else {
+    rows = await db.q('SELECT engines FROM vehicles WHERE make = ? AND model = ?', make, model);
+  }
   const engines = new Set();
   for (const r of rows) for (const e of (r.engines || '').split(',')) if (e) engines.add(e.trim());
   res.json([...engines].sort());
@@ -192,7 +223,8 @@ app.post('/api/parts/find', async (req, res) => {
     )
   `, make, model, yearN, engine || '', engine || '');
 
-  const items = await Promise.all(rows.map(r => productRow(r)));
+  const thr = await lowStockThreshold();
+  const items = await Promise.all(rows.map(r => publicProduct(r, thr)));
   res.json({
     make, model, year: yearN, engine: engine || '',
     total: items.length,
@@ -216,7 +248,7 @@ app.post('/api/orders', async (req, res) => {
         const p = await db.get('SELECT * FROM products WHERE id = ? AND active = 1', +it.id);
         if (!p) throw Object.assign(new Error(`Product #${it.id} not found`), { status: 400 });
         const qty = Math.max(1, parseInt(it.qty) || 1);
-        if (p.stock_qty < qty) throw Object.assign(new Error(`Insufficient stock for ${p.name} (only ${p.stock_qty} left)`), { status: 409 });
+        if (p.stock_qty < qty) throw Object.assign(new Error(`Not enough stock available for ${p.name}. Please reduce the quantity and try again.`), { status: 409 });
         lines.push({ product: p, qty });
       }
 

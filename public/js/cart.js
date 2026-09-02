@@ -45,8 +45,8 @@ async function render() {
           const img = p ? p.image_url : i.image;
           const name = p ? p.name : i.name;
           const pn = p ? p.part_number : i.part_number;
-          const out = p && p.stock_qty <= 0;
-          const maxQty = p ? Math.max(1, p.stock_qty) : 99;
+          const out = p && p.stock_status === 'out';
+          const maxQty = 99;
           return `
           <div class="cart-item" data-cid="${i.id}">
             <a href="/product.html?id=${i.id}"><img src="${img || '/images/placeholder-part.jpg'}" alt="${esc(name)}"></a>

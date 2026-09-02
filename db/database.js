@@ -122,7 +122,8 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT NOT NULL,
   full_name     TEXT DEFAULT '',
   role          TEXT DEFAULT 'admin',
-  created_at    TIMESTAMPTZ DEFAULT now()
+  created_at    TIMESTAMPTZ DEFAULT now(),
+  updated_at    TIMESTAMPTZ DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS messages (
   id         SERIAL PRIMARY KEY,
@@ -233,7 +234,8 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT NOT NULL,
   full_name     TEXT DEFAULT '',
   role          TEXT DEFAULT 'admin',
-  created_at    TEXT DEFAULT (datetime('now'))
+  created_at    TEXT DEFAULT (datetime('now')),
+  updated_at    TEXT DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS messages (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -381,7 +383,10 @@ async function init() {
     if (!custCols.includes('password_hash')) {
       sqliteDb.exec("ALTER TABLE customers ADD COLUMN password_hash TEXT DEFAULT ''");
     }
-    sqliteDb.exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TEXT DEFAULT (datetime('now'))");
+    const userCols = sqliteDb.prepare('PRAGMA table_info(users)').all().map(c => c.name);
+    if (!userCols.includes('updated_at')) {
+      sqliteDb.exec("ALTER TABLE users ADD COLUMN updated_at TEXT DEFAULT (datetime('now'))");
+    }
     sqliteDb.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_email ON customers(email) WHERE email != ''`);
   }
   return module.exports;
