@@ -6,7 +6,7 @@
   <title>Categories — PLUS 233 AUTOMASTER</title>
   <meta name="description" content="Browse all PLUS 233 AUTOMASTER categories — spark plugs, ignition coils, filters, brake parts, lubricants and more.">
   <link rel="icon" href="/images/logo.png" type="image/png">
-  <link rel="stylesheet" href="/css/main.css?v=20260903">
+  <link rel="stylesheet" href="/css/main.css?v=20260903b">
 </head>
 <body data-active="/categories.html">
   <div class="bg-decor"></div>
@@ -29,7 +29,7 @@
   </main>
 
   <footer id="site-footer"></footer>
-  <script src="/js/components.js?v=20260903"></script>
+  <script src="/js/components.js?v=20260903b"></script>
   <script>
     document.addEventListener('DOMContentLoaded', async () => {
       const grid = document.getElementById('cat-grid');
@@ -40,7 +40,7 @@
           <img src="${c.image || '/images/placeholder-cat.jpg'}" alt="${PA.esc(c.name)}" loading="lazy">
           <div class="cat-body">
             <div class="cat-name">${PA.esc(c.name)}</div>
-            <div class="cat-count">${PA.icons.arrowRight}<span>${c.product_count || 0} products</span></div>
+            <div class="cat-count">${PA.icons.arrowRight}<span>Browse</span></div>
           </div>
         </a>`).join('');
     });

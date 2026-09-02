@@ -24,9 +24,8 @@ async function loadSidebar() {
     const r = await fetch('/api/categories');
     const cats = await r.json();
     document.getElementById('side-cats').innerHTML =
-      `<li><a href="/shop.html" class="${!state.category ? 'active' : ''}">All Products <span id="all-count"></span></a></li>` +
-      cats.map(c => `<li><a href="/shop.html?category=${encodeURIComponent(c.slug)}" class="${state.category === c.slug ? 'active' : ''}">${esc(c.name)} <span>${c.product_count}</span></a></li>`).join('');
-    document.getElementById('all-count').textContent = cats.reduce((s, c) => s + (c.product_count || 0), 0);
+      `<li><a href="/shop.html" class="${!state.category ? 'active' : ''}">All Products</a></li>` +
+      cats.map(c => `<li><a href="/shop.html?category=${encodeURIComponent(c.slug)}" class="${state.category === c.slug ? 'active' : ''}">${esc(c.name)}</a></li>`).join('');
   } catch { /* noop */ }
 }
 
@@ -47,9 +46,10 @@ async function loadProducts() {
   const data = await r.json();
   state.total = data.total; state.pages = data.pages;
 
-  document.getElementById('result-count').textContent = `${data.total} product${data.total === 1 ? '' : 's'} found`;
   document.getElementById('page-title').textContent = data.category ? esc(data.category.name) : (state.q ? `Results for “${esc(state.q)}”` : 'Shop All Products');
-  document.getElementById('page-sub').textContent = data.category ? esc(data.category.description) : 'Genuine parts with real-time stock, prices in Ghana Cedis and instant vehicle compatibility checks.';
+  document.getElementById('page-sub').textContent = data.category ? esc(data.category.description) : 'Browse genuine parts with prices in Ghana Cedis. Use the search and filters to find exactly what fits your vehicle.';
+  const rc = document.getElementById('result-count');
+  if (rc) rc.textContent = '';
 
   const crumb = document.getElementById('bc-crumb');
   crumb.innerHTML = data.category ? `<a href="/shop.html">Shop</a> › ${esc(data.category.name)}` : 'Shop';

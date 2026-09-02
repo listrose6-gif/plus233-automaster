@@ -14,7 +14,7 @@ async function loadCategories() {
         <img src="${c.image || '/images/placeholder-cat.jpg'}" alt="${esc(c.name)}" loading="lazy">
         <div class="cat-body">
           <div class="cat-name">${esc(c.name)}</div>
-          <div class="cat-count">${PA.icons.arrowRight}<span>${c.product_count || 0} products</span></div>
+          <div class="cat-count">${PA.icons.arrowRight}<span>Browse</span></div>
         </div>
       </a>`).join('');
   } catch {
