@@ -120,6 +120,9 @@ CREATE TABLE IF NOT EXISTS order_items (
   unit_price_ghs REAL NOT NULL,
   qty            INTEGER NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_orderitems_order ON order_items(order_id);
+CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders(customer_id);
+CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
 CREATE TABLE IF NOT EXISTS users (
   id            SERIAL PRIMARY KEY,
   username      TEXT NOT NULL UNIQUE,
@@ -232,6 +235,9 @@ CREATE TABLE IF NOT EXISTS order_items (
   unit_price_ghs REAL NOT NULL,
   qty         INTEGER NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_orderitems_order ON order_items(order_id);
+CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders(customer_id);
+CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
 CREATE TABLE IF NOT EXISTS users (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   username      TEXT NOT NULL UNIQUE,
