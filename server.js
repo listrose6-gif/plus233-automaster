@@ -14,65 +14,134 @@
 const path = require('path');
 const express = require('express');
 const crypto = require('crypto');
+const compression = require('compression');
 const db = require('./db/database');
 const { seed, hashPassword } = require('./db/seed');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+app.disable('x-powered-by');
+app.set('trust proxy', 1); // Render sits behind a proxy; rate limits key on real IP
+app.use(compression()); // gzip HTML/JS/CSS/JSON responses
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 // Graceful image fallback: until real product photos exist, serve branded placeholders.
 app.use('/images', express.static(path.join(__dirname, 'public', 'images')));
 app.use('/images', (req, res) => res.sendFile(path.join(__dirname, 'public', 'images', 'placeholder-part.svg')));
 
+/* Express 4 does not catch rejected promises from async handlers — a DB
+   failure would leave the request hanging. Wrap every route so rejections
+   and synchronous throws flow to the error middleware below. */
+const ASYNC_METHODS = ['get', 'post', 'put', 'delete', 'patch'];
+for (const m of ASYNC_METHODS) {
+  const orig = app[m].bind(app);
+  app[m] = function (...args) {
+    const pathArg = args.shift();
+    const wrapped = args.map((h) => (...a) => {
+      try {
+        const out = h(...a);
+        if (out && typeof out.catch === 'function') out.catch(a[2]);
+      } catch (e) { a[2](e); }
+    });
+    return orig(pathArg, ...wrapped);
+  };
+}
+
 /* ---------------------------------------------------------------- */
 /*  Helpers                                                          */
 /* ---------------------------------------------------------------- */
-const S = async (key) => { const r = await db.get('SELECT value FROM settings WHERE key = ?', key); return r ? r.value : ''; };
-const settingsAll = async () => {
+/* ---------------- settings (5 s in-memory cache) ---------------- */
+const SETTINGS_TTL = 5000;
+let settingsCache = null;
+async function settingsAll() {
+  const now = Date.now();
+  if (settingsCache && now - settingsCache.t < SETTINGS_TTL) return settingsCache.data;
   const rows = await db.q('SELECT key, value FROM settings');
-  return Object.fromEntries(rows.map(r => [r.key, r.value]));
+  const data = Object.fromEntries(rows.map(r => [r.key, r.value]));
+  settingsCache = { t: now, data };
+  return data;
+}
+function invalidateSettingsCache() { settingsCache = null; }
+const S = async (key) => {
+  const all = await settingsAll();
+  return all[key] !== undefined ? all[key] : '';
 };
-
 const DEFAULT_LOW_STOCK = 10;
 async function lowStockThreshold() {
-  const r = await db.get('SELECT value FROM settings WHERE key = ?', 'low_stock_threshold');
-  const n = parseInt(r && r.value, 10);
+  const n = parseInt((await settingsAll()).low_stock_threshold, 10);
   return Number.isFinite(n) && n >= 0 ? n : DEFAULT_LOW_STOCK;
 }
 
-/* Admin serializer — exact stock numbers (admin dashboard only). */
-async function productRow(p, withCompat = false) {
+/* ---------------- serializers ----------------
+   Admin serializer: exact stock numbers. Customer serializer (publicProduct):
+   NEVER exposes quantities — only In Stock / Limited Stock / Out of Stock
+   status labels, with 'low' governed by the configurable threshold.
+   compat may be: undefined/false = omit; true = load rows (single product);
+   array = attach preloaded rows (batch list loading). */
+async function compatForProducts(rows) {
+  const map = new Map();
+  if (!rows || !rows.length) return map;
+  const ids = [...new Set(rows.map(r => r.id))];
+  const list = await db.q(
+    `SELECT * FROM product_compatibility WHERE product_id IN (${ids.map(() => '?').join(',')}) ORDER BY product_id, make, model`,
+    ids
+  );
+  for (const id of ids) map.set(id, []);
+  for (const c of list) { const a = map.get(c.product_id); if (a) a.push(c); }
+  return map;
+}
+async function productRow(p, compat = false) {
   const row = { ...p };
   row.in_stock = p.stock_qty > 0;
   row.stock_status = p.stock_qty <= 0 ? 'out' : (p.stock_qty <= p.low_stock_at ? 'low' : 'in');
-  if (withCompat) {
+  if (compat === true) {
     row.compatibility = await db.q(
       'SELECT make, model, year_start, year_end, engine FROM product_compatibility WHERE product_id = ? ORDER BY make, model', p.id
     );
+  } else if (Array.isArray(compat)) {
+    row.compatibility = compat;
   }
   return row;
 }
-
-/* Customer serializer — never exposes stock quantities, only status labels.
-   'low' (Limited Stock) uses the global configurable threshold. */
-async function publicProduct(p, thr, withCompat = false) {
+async function publicProduct(p, thr, compat = false) {
   const row = { ...p };
   delete row.stock_qty;
   delete row.low_stock_at;
   row.in_stock = p.stock_qty > 0;
   row.stock_status = p.stock_qty <= 0 ? 'out' : (p.stock_qty <= thr ? 'low' : 'in');
-  if (withCompat) {
+  if (compat === true) {
     row.compatibility = await db.q(
       'SELECT make, model, year_start, year_end, engine FROM product_compatibility WHERE product_id = ? ORDER BY make, model', p.id
     );
+  } else if (Array.isArray(compat)) {
+    row.compatibility = compat;
   }
   return row;
 }
 
 async function getCategory(slug) {
   return db.get('SELECT * FROM categories WHERE slug = ?', slug);
+}
+
+/* ---------------- simple per-IP rate limiter ---------------- */
+const rateBuckets = new Map();
+function rateLimit(maxPerWindow, windowMs, label) {
+  return (req, res, next) => {
+    const key = label + ':' + (req.ip || 'unknown');
+    const now = Date.now();
+    const b = rateBuckets.get(key);
+    if (!b || now - b.t > windowMs) {
+      rateBuckets.set(key, { t: now, n: 1 });
+      if (rateBuckets.size > 20000) rateBuckets.clear();
+      return next();
+    }
+    b.n++;
+    if (b.n > maxPerWindow) {
+      return res.status(429).json({ error: 'Too many requests — please try again in a moment.' });
+    }
+    next();
+  };
 }
 
 /* ---------------------------------------------------------------- */
@@ -224,17 +293,28 @@ app.post('/api/parts/find', async (req, res) => {
   `, make, model, yearN, engine || '', engine || '');
 
   const thr = await lowStockThreshold();
-  const items = await Promise.all(rows.map(r => publicProduct(r, thr)));
+  const compatMap = await compatForProducts(rows);
+  const items = await Promise.all(rows.map(r => publicProduct(r, thr, compatMap.get(r.id))));
   res.json({
     make, model, year: yearN, engine: engine || '',
     total: items.length,
     items,
-    universal_count: items.filter(i => i.compatibility && i.compatibility.some(c => c.make === 'Universal')).length
+    universal_count: items.filter(i => Array.isArray(i.compatibility) && i.compatibility.some(c => c.make === 'Universal')).length
   });
 });
 
 /* ---------------- orders / checkout ---------------- */
-app.post('/api/orders', async (req, res) => {
+/* Collision-resistant order number: PA-YYYYMMDD-XXXXX (X = unambiguous
+   base32 chars). The old Date.now()%100000 suffix collided when two orders
+   landed in the same millisecond → duplicate-key 500s under load. */
+const ORDER_NO_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+function randomOrderSuffix(len = 5) {
+  let s = '';
+  for (let i = 0; i < len; i++) s += ORDER_NO_ALPHABET[crypto.randomInt(0, ORDER_NO_ALPHABET.length)];
+  return s;
+}
+
+app.post('/api/orders', rateLimit(15, 60 * 1000, 'orders'), async (req, res) => {
   const { items, customer, delivery } = req.body || {};
   if (!items || !Array.isArray(items) || !items.length) return res.status(400).json({ error: 'No items in order' });
   if (!customer || !customer.name || !customer.phone || !customer.address || !customer.city)
@@ -242,28 +322,51 @@ app.post('/api/orders', async (req, res) => {
 
   try {
     const result = await db.transaction(async () => {
-      // resolve items & validate stock
+      // 1) Resolve line items (price/name snapshot) — read only, no stock claim yet
       const lines = [];
       for (const it of items) {
-        const p = await db.get('SELECT * FROM products WHERE id = ? AND active = 1', +it.id);
+        const p = await db.get('SELECT id, name, part_number, price_ghs, stock_qty FROM products WHERE id = ? AND active = 1', +it.id);
         if (!p) throw Object.assign(new Error(`Product #${it.id} not found`), { status: 400 });
         const qty = Math.max(1, parseInt(it.qty) || 1);
-        if (p.stock_qty < qty) throw Object.assign(new Error(`Not enough stock available for ${p.name}. Please reduce the quantity and try again.`), { status: 409 });
         lines.push({ product: p, qty });
       }
+      // 2) Lock/claim stock atomically in ascending product order so two
+      //    concurrent orders can never deadlock on each other's rows.
+      //    UPDATE … WHERE stock_qty >= ? is atomic: if two customers race
+      //    for the last unit(s), exactly one UPDATE affects a row and the
+      //    other sees 0 changes → clean 409, no overselling, no negative stock.
+      lines.sort((a, b) => a.product.id - b.product.id);
+      for (const l of lines) {
+        const upd = await db.run(
+          `UPDATE products SET stock_qty = stock_qty - ?, updated_at = datetime('now') WHERE id = ? AND stock_qty >= ?`,
+          l.qty, l.product.id, l.qty
+        );
+        if (!upd.changes) {
+          throw Object.assign(new Error(`Not enough stock available for ${l.product.name}. Please reduce the quantity and try again.`), { status: 409 });
+        }
+      }
 
-      // customer: prefer signed-in account → else match by email → else create guest
+      // 3) customer: prefer signed-in account → else match by email → else create guest
       let cust = await authCustomer(req);
       if (!cust && customer.email) {
         cust = await db.get('SELECT id FROM customers WHERE email = ?', String(customer.email).trim().toLowerCase());
       }
       if (!cust) {
-        const r = await db.run('INSERT INTO customers (name, email, phone, address, city) VALUES (?,?,?,?,?)',
-          customer.name, String(customer.email || '').trim().toLowerCase(), customer.phone, customer.address, customer.city);
-        cust = { id: r.lastInsertRowid };
+        try {
+          const r = await db.run('INSERT INTO customers (name, email, phone, address, city) VALUES (?,?,?,?,?)',
+            customer.name, String(customer.email || '').trim().toLowerCase(), customer.phone, customer.address, customer.city);
+          cust = { id: r.lastInsertRowid };
+        } catch (e) {
+          // two guests with the same email raced — attach to the existing account
+          const em = String(customer.email || '').trim().toLowerCase();
+          if (!em) throw e;
+          const dup = await db.get('SELECT id FROM customers WHERE email = ?', em);
+          if (!dup) throw e;
+          cust = { id: dup.id };
+        }
       }
 
-      // pricing from DB settings — never from the client
+      // 4) pricing from DB settings — never from the client
       const subtotal = lines.reduce((s, l) => s + l.product.price_ghs * l.qty, 0);
       const freeOver = parseFloat(await S('free_delivery_over')) || 0;
       const accraFee = parseFloat(await S('delivery_fee_accra')) || 0;
@@ -271,9 +374,7 @@ app.post('/api/orders', async (req, res) => {
       const inAccra = /accra/i.test(customer.city);
       const deliveryFee = subtotal >= freeOver ? 0 : (inAccra ? accraFee : nationFee);
 
-      const orderNumber = 'PA-' + new Date().toISOString().slice(0, 10).replace(/-/g, '') + '-' +
-        String(Date.now() % 100000).padStart(5, '0');
-
+      const orderNumber = 'PA-' + new Date().toISOString().slice(0, 10).replace(/-/g, '') + '-' + randomOrderSuffix();
       const r = await db.run(`INSERT INTO orders (order_number, customer_id, customer_name, customer_phone, customer_email, address, city, payment_method, payment_status, status, subtotal_ghs, delivery_ghs, total_ghs, notes)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         orderNumber, cust.id, customer.name, customer.phone, customer.email || '', customer.address, customer.city,
@@ -284,7 +385,6 @@ app.post('/api/orders', async (req, res) => {
       for (const l of lines) {
         await db.run('INSERT INTO order_items (order_id, product_id, product_name, part_number, unit_price_ghs, qty) VALUES (?,?,?,?,?,?)',
           r.lastInsertRowid, l.product.id, l.product.name, l.product.part_number, l.product.price_ghs, l.qty);
-        await db.run('UPDATE products SET stock_qty = stock_qty - ?, updated_at = datetime(\'now\') WHERE id = ?', l.qty, l.product.id);
       }
       return { id: r.lastInsertRowid, order_number: orderNumber };
     });
@@ -305,7 +405,7 @@ app.get('/api/orders/:orderNumber', async (req, res) => {
 });
 
 /* ---------------- contact messages ---------------- */
-app.post('/api/contact', async (req, res) => {
+app.post('/api/contact', rateLimit(8, 60 * 1000, 'contact'), async (req, res) => {
   const { name, email, phone, subject, message } = req.body || {};
   if (!name || !message) return res.status(400).json({ error: 'Name and message are required' });
   await db.run('INSERT INTO messages (name, email, phone, subject, message) VALUES (?,?,?,?,?)',
@@ -316,7 +416,7 @@ app.post('/api/contact', async (req, res) => {
 /* ---------------------------------------------------------------- */
 /*  ADMIN API                                                        */
 /* ---------------------------------------------------------------- */
-app.post('/api/admin/login', async (req, res) => {
+app.post('/api/admin/login', rateLimit(10, 60 * 1000, 'adminlogin'), async (req, res) => {
   const { username, password } = req.body || {};
   const user = await db.get('SELECT * FROM users WHERE username = ?', username || '');
   if (!user) return res.status(401).json({ error: 'Invalid credentials' });
@@ -329,7 +429,7 @@ app.post('/api/admin/login', async (req, res) => {
 /* ---------------------------------------------------------------- */
 /*  CUSTOMER ACCOUNTS (registration / sign-in / profile / orders)    */
 /* ---------------------------------------------------------------- */
-app.post('/api/auth/register', async (req, res) => {
+app.post('/api/auth/register', rateLimit(10, 60 * 1000, 'register'), async (req, res) => {
   const { name, email, password, phone } = req.body || {};
   if (!name || !email || !password) return res.status(400).json({ error: 'Name, email and password are required' });
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(400).json({ error: 'Enter a valid email address' });
@@ -343,7 +443,7 @@ app.post('/api/auth/register', async (req, res) => {
   res.status(201).json({ token: makeToken({ uid: user.id, scope: 'customer', exp: Date.now() + 1000 * 60 * 60 * 24 * 7 }), user });
 });
 
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', rateLimit(20, 60 * 1000, 'login'), async (req, res) => {
   const { email, password } = req.body || {};
   const em = String(email || '').trim().toLowerCase();
   const cust = await db.get('SELECT * FROM customers WHERE email = ?', em);
@@ -399,7 +499,8 @@ app.get('/api/admin/products', requireAdmin, async (req, res) => {
   const p = Math.max(1, parseInt(page) || 1);
   const total = (await db.get(`SELECT COUNT(*) c FROM products p WHERE ${where.join(' AND ')}`, params)).c;
   const rows = await db.q(`SELECT p.*, c.name category_name FROM products p JOIN categories c ON c.id = p.category_id WHERE ${where.join(' AND ')} ORDER BY p.id DESC LIMIT ${per_page} OFFSET ${(p - 1) * per_page}`, params);
-  res.json({ items: await Promise.all(rows.map(r => productRow(r, true))), total, page: p });
+  const compatMap = await compatForProducts(rows);
+  res.json({ items: await Promise.all(rows.map(r => productRow(r, compatMap.get(r.id)))), total, page: p });
 });
 
 function productPayload(body) {
@@ -556,6 +657,7 @@ app.put('/api/admin/settings', requireAdmin, async (req, res) => {
       await db.run('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', k, String(v));
     }
   });
+  invalidateSettingsCache();
   res.json(await settingsAll());
 });
 
@@ -577,6 +679,19 @@ app.delete('/api/admin/vehicles/:id', requireAdmin, async (req, res) => {
 
 /* SPA-ish fallback for unknown /api routes */
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
+
+// Central error handler — async failures from wrapped routes land here as
+// clean JSON (400 for malformed JSON body, 500 otherwise) instead of hanging.
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  if (err && (err.type === 'entity.parse.failed' || err instanceof SyntaxError)) {
+    return res.status(400).json({ error: 'Invalid JSON body' });
+  }
+  const status = (err && (err.status || err.statusCode)) || 500;
+  console.error(`[${new Date().toISOString()}]`, req.method, req.originalUrl, '→', status, err && err.message);
+  if (status >= 500) return res.status(500).json({ error: 'Something went wrong — please try again.' });
+  res.status(status).json({ error: err.message });
+});
 
 // Catch-all → static 404 page
 app.use((req, res) => res.status(404).sendFile(path.join(__dirname, 'public', '404.html')));
