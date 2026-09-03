@@ -19,11 +19,15 @@
 'use strict';
 const path = require('path');
 const fs = require('fs');
+const { AsyncLocalStorage } = require('async_hooks');
 
 const USE_PG = !!((process.env.DATABASE_URL || '').trim());
 let sqliteDb = null;
 let pgPool = null;
-let pgTx = null;
+
+/* Per-request async context so concurrent transactions each use their own
+   pooled PG connection (never a shared module-global client). */
+const txStorage = new AsyncLocalStorage();
 
 /* ------------------------------------------------------------------ */
 /*  PostgreSQL schema (DDL is idempotent)                              */
@@ -289,7 +293,7 @@ async function q(sql, ...args) {
   const params = norm(args);
   if (USE_PG) {
     const { text, values } = expandPg(sql, params);
-    const client = pgTx || pgPool;
+    const client = txStorage.getStore() || pgPool;
     const r = await client.query(text, values);
     return r.rows;
   }
@@ -306,7 +310,7 @@ async function run(sql, ...args) {
     const m = /^\s*INSERT\s+INTO\s+(\w+)/i.exec(s);
     if (m && m[1].toLowerCase() !== 'settings' && !/RETURNING/i.test(s)) s += ' RETURNING id';
     const { text, values } = expandPg(s, params);
-    const client = pgTx || pgPool;
+    const client = txStorage.getStore() || pgPool;
     const r = await client.query(text, values);
     return { lastInsertRowid: r.rows && r.rows[0] ? r.rows[0].id : null, changes: r.rowCount || 0 };
   }
@@ -315,29 +319,32 @@ async function run(sql, ...args) {
 }
 async function exec(sql) {
   if (USE_PG) {
-    await (pgTx || pgPool).query(sql);
+    await (txStorage.getStore() || pgPool).query(sql);
   } else {
     sqliteDb.exec(sql);
   }
 }
+
+/* SQLite uses one shared connection, so transactions must never overlap:
+   serialize BEGIN…COMMIT blocks through a promise queue. */
+let sqliteTxTail = Promise.resolve();
 async function transaction(fn) {
   if (USE_PG) {
     const client = await pgPool.connect();
-    const prev = pgTx;
-    pgTx = client;
     try {
       await client.query('BEGIN');
-      const result = await fn();
+      // All db.* calls made inside fn see this client via async context.
+      const result = await txStorage.run(client, fn);
       await client.query('COMMIT');
       return result;
     } catch (e) {
       try { await client.query('ROLLBACK'); } catch (_) { /* noop */ }
       throw e;
     } finally {
-      pgTx = prev;
       client.release();
     }
-  } else {
+  }
+  const runTx = sqliteTxTail.then(async () => {
     sqliteDb.exec('BEGIN');
     try {
       const r = await fn();
@@ -347,7 +354,9 @@ async function transaction(fn) {
       try { sqliteDb.exec('ROLLBACK'); } catch (_) { /* noop */ }
       throw e;
     }
-  }
+  });
+  sqliteTxTail = runTx.catch(() => { /* keep the chain alive */ });
+  return runTx;
 }
 
 /* ------------------------------------------------------------------ */
@@ -362,7 +371,7 @@ async function init() {
     pgPool = new Pool({
       connectionString: process.env.DATABASE_URL,
       ssl: { rejectUnauthorized: false },
-      max: 5,
+      max: 10,
       connectionTimeoutMillis: 15000
     });
     await pgPool.query('SELECT 1');
