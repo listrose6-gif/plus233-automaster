@@ -627,6 +627,62 @@ app.put('/api/admin/products/:id', requireAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+/* ---- product images ----
+   Admin uploads are compressed in the browser (~100–200 KB) and stored
+   durably in the database (BYTEA/BLOB) — NOT on Render's ephemeral disk —
+   so images survive every deploy. Customers may only READ images through
+   the public GET route; the write endpoint is Admin-only.
+   The product row's image_url points at the internal route with a cache-
+   busting version, so replacing the photo needs no code change. */
+const MAX_IMAGE_BYTES = 600 * 1024; // decoded; compressed uploads are ~100–200 KB
+const ALLOWED_IMAGE_MIME = new Set(['image/jpeg', 'image/png', 'image/webp']);
+function sniffImageMime(buf) {
+  if (buf.length >= 3 && buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) return 'image/jpeg';
+  if (buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47) return 'image/png';
+  if (buf.length >= 12 && buf.toString('latin1', 0, 4) === 'RIFF' && buf.toString('latin1', 8, 12) === 'WEBP') return 'image/webp';
+  return null;
+}
+
+/* Public read-only: customers (and Admin lists) display product photos via this route. */
+app.get('/api/products/:id/image', async (req, res) => {
+  const row = await db.get('SELECT data, mime_type FROM product_images WHERE product_id = ?', +req.params.id);
+  if (!row || !row.data) return res.status(404).json({ error: 'No image uploaded for this product' });
+  const buf = Buffer.isBuffer(row.data) ? row.data : Buffer.from(row.data);
+  res.setHeader('Content-Type', row.mime_type);
+  res.setHeader('Content-Length', buf.length);
+  res.setHeader('Cache-Control', 'public, max-age=31536000'); // URL carries ?v= on replace
+  res.end(buf);
+});
+
+/* Admin-only write: create or replace a product photo. */
+app.put('/api/admin/products/:id/image', requireAdmin, async (req, res) => {
+  try {
+    const pid = +req.params.id;
+    const exists = await db.get('SELECT id FROM products WHERE id = ?', pid);
+    if (!exists) return res.status(404).json({ error: 'Product not found' });
+    const { mime, data } = req.body || {};
+    if (!ALLOWED_IMAGE_MIME.has(mime)) {
+      return res.status(400).json({ error: 'Image type must be JPG, PNG or WebP' });
+    }
+    if (!data || typeof data !== 'string') return res.status(400).json({ error: 'Missing image data' });
+    const buf = Buffer.from(data, 'base64');
+    if (buf.length === 0) return res.status(400).json({ error: 'Empty image' });
+    if (buf.length > MAX_IMAGE_BYTES) {
+      return res.status(413).json({ error: 'Image too large after compression (max 600 KB). Please use a smaller photo.' });
+    }
+    const sniffed = sniffImageMime(buf);
+    if (!sniffed) return res.status(400).json({ error: 'Unrecognised image format' });
+    if (sniffed !== mime) return res.status(400).json({ error: 'Image content does not match the declared type' });
+    // upsert the blob, then point the product at the internal route (?v= busts cache on replace)
+    await db.q(`INSERT INTO product_images (product_id, mime_type, data) VALUES (?,?,?)
+      ON CONFLICT (product_id) DO UPDATE SET mime_type = excluded.mime_type, data = excluded.data, updated_at = datetime('now')
+      RETURNING product_id`, pid, mime, buf);
+    const imageUrl = `/api/products/${pid}/image?v=${Date.now().toString(36)}`;
+    await db.run('UPDATE products SET image_url = ?, updated_at = datetime(\'now\') WHERE id = ?', imageUrl, pid);
+    res.json({ ok: true, image_url: imageUrl });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 app.get('/api/admin/products/:id', requireAdmin, async (req, res) => {
   const p = await db.get('SELECT * FROM products WHERE id = ?', +req.params.id);
   if (!p) return res.status(404).json({ error: 'Product not found' });

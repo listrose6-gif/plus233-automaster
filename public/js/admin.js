@@ -7,6 +7,60 @@
 const esc = PA.esc;
 const ADMIN_KEY = 'pa233_admin_token';
 
+/* ---------------- product image upload (browser-side compression) ----------------
+   Picked photos are resized (max 1000 px), flattened onto white (transparency-safe
+   for PNG) and re-encoded to JPG (or WebP when the source is WebP) until they land
+   near the 100–200 KB target, then uploaded as base64 JSON to the Admin-only route.
+   The store never exposes the management endpoint to customers. */
+const ACCEPT_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+async function compressImageFile(file) {
+  if (!ACCEPT_IMAGE_TYPES.includes(file.type)) throw new Error('Please choose a JPG, PNG or WebP image');
+  if (file.size > 25 * 1024 * 1024) throw new Error('Photo is too large (max 25 MB)');
+  const raw = await new Promise((res, rej) => {
+    const fr = new FileReader();
+    fr.onload = () => res(fr.result);
+    fr.onerror = () => rej(new Error('Could not read the file'));
+    fr.readAsDataURL(file);
+  });
+  const img = await new Promise((res, rej) => {
+    const im = new Image();
+    im.onload = () => res(im);
+    im.onerror = () => rej(new Error('Unsupported or corrupt image'));
+    im.src = raw;
+  });
+  const outType = file.type === 'image/webp' ? 'image/webp' : 'image/jpeg';
+  const encode = (type, maxDim, q) => {
+    const scale = Math.min(1, maxDim / Math.max(img.naturalWidth, img.naturalHeight));
+    const w = Math.max(1, Math.round(img.naturalWidth * scale));
+    const h = Math.max(1, Math.round(img.naturalHeight * scale));
+    const cv = document.createElement('canvas');
+    cv.width = w; cv.height = h;
+    const cx = cv.getContext('2d');
+    cx.fillStyle = '#ffffff';           // flatten any PNG transparency onto white
+    cx.fillRect(0, 0, w, h);
+    cx.drawImage(img, 0, 0, w, h);
+    return new Promise((res) => cv.toBlob((b) => res(b), type, q));
+  };
+  let blob = await encode(outType, 1000, 0.82);
+  if (!blob && outType !== 'image/jpeg') blob = await encode('image/jpeg', 1000, 0.82); // WebP encode unsupported fallback
+  if (!blob) blob = await encode('image/png', 1000, 0.9);
+  if (!blob) throw new Error('Could not process this image');
+  const mime = blob.type || 'image/jpeg';
+  // quality/size ladder toward the ~100–200 KB target
+  if (blob.size > 240 * 1024) { const b2 = await encode(mime, 1000, 0.6); if (b2 && b2.size < blob.size) blob = b2; }
+  if (blob.size > 420 * 1024) { const b3 = await encode(mime, 800, 0.6); if (b3 && b3.size < blob.size) blob = b3; }
+  if (blob.size > 520 * 1024) { const b4 = await encode(mime, 640, 0.58); if (b4 && b4.size < blob.size) blob = b4; }
+  const b64 = await new Promise((res) => {
+    const fr = new FileReader();
+    fr.onload = () => res(String(fr.result).split(',')[1]);
+    fr.onerror = () => res(null);
+    fr.readAsDataURL(blob);
+  });
+  if (!b64) throw new Error('Could not compress this image');
+  return { mime, b64, size: blob.size, previewUrl: URL.createObjectURL(blob) };
+}
+function fmtKB(n) { return Math.max(1, Math.round(n / 1024)) + ' KB'; }
+
 const api = {
   token: localStorage.getItem(ADMIN_KEY) || '',
   async req(method, url, body) {
@@ -259,6 +313,7 @@ async function openProductModal(id) {
 
   const compRows = (p.compatibility && p.compatibility.length ? p.compatibility : [{ make: '', model: '', year_start: '', year_end: '', engine: '' }])
     .map(c => compatRow(c)).join('');
+  let pendingImage = null; // { mime, b64, size, previewUrl } chosen but not yet uploaded
 
   openModal(`
     <div class="modal-head"><h3>${id ? 'Edit Product' : 'New Product'}</h3>
@@ -280,7 +335,22 @@ async function openProductModal(id) {
           <option value="verified" ${p.fitment_status === 'verified' ? 'selected' : ''}>Verified</option>
         </select>
       </div>
-      <div class="field full" style="grid-column:1/-1"><label>Image URL (optional)</label><input id="f-img" value="${esc(p.image_url)}" placeholder="/images/… or https://…"></div>
+      <div class="field full" style="grid-column:1/-1">
+        <label>Product Image <span class="t-muted" style="text-transform:none">(JPG / PNG / WebP — auto-compressed, stored safely)</span></label>
+        <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-top:4px">
+          <img id="f-img-preview" src="${p.image_url || '/images/placeholder-part.svg'}" alt="preview"
+               style="width:86px;height:86px;object-fit:cover;border-radius:10px;border:1px solid var(--border-light);background:#fff">
+          <div>
+            <label class="mini-btn" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;margin:0">
+              📷 Choose photo…
+              <input type="file" id="f-file" accept="image/jpeg,image/png,image/webp" hidden>
+            </label>
+            <div class="t-muted" style="margin-top:5px;font-size:.74rem" id="f-img-hint">${p.image_url ? 'Current image shown — pick a new photo to replace it.' : 'No photo yet — pick one, or paste an external URL below.'}</div>
+          </div>
+        </div>
+        <div style="margin-top:10px;font-size:.78rem;color:var(--muted)">…or use an external image URL (optional alternative):</div>
+        <input id="f-img" value="${esc(p.image_url && p.image_url.indexOf('/api/products/') !== 0 ? p.image_url : '')}" placeholder="/images/… or https://…" style="margin-top:4px">
+      </div>
       <div class="field full" style="grid-column:1/-1"><label>Description</label><textarea id="f-desc" style="min-height:70px">${esc(p.description)}</textarea></div>
       <div class="field full" style="grid-column:1/-1"><label>Specifications <span class="t-muted" style="text-transform:none">(package size, thread, grade etc.)</span></label><textarea id="f-specs" style="min-height:56px">${esc(p.specifications || '')}</textarea></div>
       <label style="display:flex;gap:8px;align-items:center;color:var(--text-2);font-size:.9rem"><input type="checkbox" id="f-featured" ${p.featured ? 'checked' : ''} style="accent-color:var(--blue)"> Featured product</label>
@@ -296,6 +366,19 @@ async function openProductModal(id) {
     </div>
     ${modalFoot(id ? 'Save Changes' : 'Create Product', '')}`,
     (m) => {
+      const fileInput = document.getElementById('f-file');
+      const preview = document.getElementById('f-img-preview');
+      const hint = document.getElementById('f-img-hint');
+      fileInput.addEventListener('change', async () => {
+        const f = fileInput.files && fileInput.files[0];
+        if (!f) return;
+        try {
+          const comp = await compressImageFile(f);
+          pendingImage = comp;
+          if (preview) preview.src = comp.previewUrl;
+          if (hint) hint.innerHTML = `<span style="color:var(--success)">Photo ready — ${fmtKB(comp.size)}${comp.size > 240 * 1024 ? ' (best effort under 250 KB)' : ''}. Save the product to upload.</span>`;
+        } catch (e) { PA.toast(e.message, 'error'); }
+      });
       document.getElementById('comp-add').addEventListener('click', () => {
         document.getElementById('comp-editor').insertAdjacentHTML('beforeend', compatRow({ make: '', model: '', year_start: '', year_end: '', engine: '' }));
       });
@@ -330,8 +413,11 @@ async function openProductModal(id) {
           PA.toast('Invalid price', 'error'); return;
         }
         try {
-          if (id) await api.put('/api/admin/products/' + id, data);
-          else await api.post('/api/admin/products', data);
+          const saved = id ? await api.put('/api/admin/products/' + id, data) : await api.post('/api/admin/products', data);
+          const savedId = id || (saved && saved.id);
+          if (pendingImage && savedId) {
+            await api.put('/api/admin/products/' + savedId + '/image', { mime: pendingImage.mime, data: pendingImage.b64 });
+          }
           PA.toast('Product saved ✓', 'success');
           closeModal(); vProducts(box);
         } catch (e) { PA.toast(e.message, 'error'); }

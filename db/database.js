@@ -77,6 +77,13 @@ CREATE TABLE IF NOT EXISTS product_compatibility (
 );
 CREATE INDEX IF NOT EXISTS idx_compat_product ON product_compatibility(product_id);
 CREATE INDEX IF NOT EXISTS idx_compat_vehicle ON product_compatibility(make, model);
+CREATE TABLE IF NOT EXISTS product_images (
+  product_id INTEGER PRIMARY KEY REFERENCES products(id) ON DELETE CASCADE,
+  mime_type  TEXT NOT NULL,
+  data       BYTEA NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
 CREATE TABLE IF NOT EXISTS vehicles (
   id         SERIAL PRIMARY KEY,
   make       TEXT NOT NULL,
@@ -196,6 +203,13 @@ CREATE TABLE IF NOT EXISTS product_compatibility (
 );
 CREATE INDEX IF NOT EXISTS idx_compat_product ON product_compatibility(product_id);
 CREATE INDEX IF NOT EXISTS idx_compat_vehicle ON product_compatibility(make, model);
+CREATE TABLE IF NOT EXISTS product_images (
+  product_id INTEGER PRIMARY KEY REFERENCES products(id) ON DELETE CASCADE,
+  mime_type  TEXT NOT NULL,
+  data       BLOB NOT NULL,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
 CREATE TABLE IF NOT EXISTS vehicles (
   id      INTEGER PRIMARY KEY AUTOINCREMENT,
   make    TEXT NOT NULL,
@@ -425,12 +439,15 @@ async function init() {
     // ——— additive catalogue-readiness migrations (idempotent) ———
     // If an older dev DB still has UNIQUE on part_number (or NOT NULL price),
     // rebuild the products table with the new shape, preserving all data.
+    // IMPORTANT: rebuild via a NEW table + drop + rename. Never RENAME the
+    // live products table first: SQLite silently re-points every child FK
+    // (order_items, product_compatibility, product_images) at the old name
+    // and leaves them dangling once that table is dropped.
     const uniqIdx = sqliteDb.prepare("PRAGMA index_list('products')").all().filter(i => i.origin === 'u' && i.unique);
     if (uniqIdx.length) {
       sqliteDb.exec('PRAGMA foreign_keys = OFF');
       sqliteDb.exec('BEGIN');
-      sqliteDb.exec('ALTER TABLE products RENAME TO products_legacy');
-      sqliteDb.exec(`CREATE TABLE products (
+      sqliteDb.exec(`CREATE TABLE products_new (
         id          INTEGER PRIMARY KEY AUTOINCREMENT,
         part_number TEXT NOT NULL DEFAULT '',
         name        TEXT NOT NULL,
@@ -450,9 +467,10 @@ async function init() {
         normalized_part_number  TEXT NOT NULL DEFAULT '',
         fitment_status          TEXT NOT NULL DEFAULT 'fitment_verification_required'
       )`);
-      sqliteDb.exec(`INSERT INTO products (id, part_number, name, brand, category_id, description, price_ghs, stock_qty, low_stock_at, image_url, featured, active, created_at, updated_at)
-        SELECT id, part_number, name, brand, category_id, description, price_ghs, stock_qty, low_stock_at, image_url, featured, active, created_at, updated_at FROM products_legacy`);
-      sqliteDb.exec('DROP TABLE products_legacy');
+      sqliteDb.exec(`INSERT INTO products_new (id, part_number, name, brand, category_id, description, price_ghs, stock_qty, low_stock_at, image_url, featured, active, created_at, updated_at)
+        SELECT id, part_number, name, brand, category_id, description, price_ghs, stock_qty, low_stock_at, image_url, featured, active, created_at, updated_at FROM products`);
+      sqliteDb.exec('DROP TABLE products');
+      sqliteDb.exec('ALTER TABLE products_new RENAME TO products');
       sqliteDb.exec('COMMIT');
       sqliteDb.exec('PRAGMA foreign_keys = ON');
     } else {
@@ -467,14 +485,23 @@ async function init() {
         if (!prodCols.includes(col)) sqliteDb.exec(`ALTER TABLE products ADD COLUMN ${col} ${ddl}`);
       }
     }
-    sqliteDb.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_products_part_brand ON products(part_number, brand) WHERE part_number != ''`);
-    sqliteDb.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_products_blank_name ON products(lower(name), brand) WHERE part_number = ''`);
-    sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_products_normalized ON products(normalized_part_number)`);
-    sqliteDb.exec(`UPDATE products SET normalized_part_number = lower(replace(replace(part_number,'-',''),' ','')) WHERE normalized_part_number = '' AND part_number <> ''`);
-    sqliteDb.exec(`UPDATE products SET fitment_status = 'verified'
-      WHERE fitment_status = 'fitment_verification_required'
-        AND part_number <> ''
-        AND EXISTS (SELECT 1 FROM product_compatibility pc WHERE pc.product_id = products.id)`);
+    // Self-heal: a dev DB that hit an earlier intermediate migration may have
+    // child tables whose FK still points at a dropped 'products_legacy' table.
+    // Rebuild each such table (preserving data); the IF NOT EXISTS index
+    // statements that follow recreate any indexes on the fresh table.
+    const dangling = sqliteDb.prepare("SELECT name, sql FROM sqlite_master WHERE type = 'table' AND sql LIKE '%products_legacy%'").all();
+    for (const t of dangling) {
+      sqliteDb.exec('PRAGMA foreign_keys = OFF');
+      sqliteDb.exec('BEGIN');
+      const createSql = t.sql.replace(/REFERENCES\s*"?products_legacy"?/gi, 'REFERENCES products');
+      sqliteDb.exec(`ALTER TABLE ${t.name} RENAME TO ${t.name}_fkfix`);
+      sqliteDb.exec(createSql);
+      const cols = sqliteDb.prepare(`PRAGMA table_info(${t.name})`).all().map(c => c.name).join(',');
+      sqliteDb.exec(`INSERT INTO ${t.name} (${cols}) SELECT ${cols} FROM ${t.name}_fkfix`);
+      sqliteDb.exec(`DROP TABLE ${t.name}_fkfix`);
+      sqliteDb.exec('COMMIT');
+      sqliteDb.exec('PRAGMA foreign_keys = ON');
+    }
     const custCols = sqliteDb.prepare('PRAGMA table_info(customers)').all().map(c => c.name);
     if (!custCols.includes('password_hash')) {
       sqliteDb.exec("ALTER TABLE customers ADD COLUMN password_hash TEXT DEFAULT ''");
