@@ -27,7 +27,7 @@ const CATEGORIES = [
   ['Fuel Pumps', 'fuel-pumps', 'Fuel pumps and delivery modules for consistent fuel pressure.', '/images/cat-fuel-pumps.jpg', 3],
   ['Oil Filters', 'oil-filters', 'Engine oil filters engineered for maximum filtration.', '/images/cat-oil-filters.jpg', 4],
   ['Air Filters', 'air-filters', 'Engine air filters for clean airflow and better performance.', '/images/cat-air-filters.jpg', 5],
-  ['AC Filters', 'ac-filters', 'Cabin air filters for fresh, clean in-car air.', '/images/cat-ac-filters.jpg', 6],
+  ['AC/Cabin Filters', 'ac-filters', 'Cabin air filters for fresh, clean in-car air.', '/images/cat-ac-filters.jpg', 6],
   ['Fuel Filters', 'fuel-filters', 'Fuel filters that protect injectors and pumps.', '/images/cat-fuel-filters.jpg', 7],
   ['Brake Pads', 'brake-pads', 'OEM-grade brake pads for confident, safe stopping.', '/images/cat-brake-pads.jpg', 8],
   ['Brake Fluid', 'brake-fluid', 'DOT 3 and DOT 4 brake fluids for dependable braking.', '/images/cat-brake-fluid.jpg', 9],
@@ -35,7 +35,14 @@ const CATEGORIES = [
   ['Ball Joints', 'ball-joints', 'Suspension ball joints built for Ghana roads.', '/images/cat-ball-joints.jpg', 11],
   ['Lubricants & Oils', 'lubricants-oils', 'Engine oils, gear oils and lubricants from world brands.', '/images/cat-lubricants.jpg', 12],
   ['Automotive Chemicals', 'automotive-chemicals', 'Cleaners, additives, coolants and workshop chemicals.', '/images/cat-chemicals.jpg', 13],
-  ['Sealants & Epoxy', 'sealants-epoxy', 'Gasket makers, sealants and epoxies for every repair.', '/images/cat-sealants.jpg', 14]
+  ['Sealants & Epoxy', 'sealants-epoxy', 'Gasket makers, sealants and epoxies for every repair.', '/images/cat-sealants.jpg', 14],
+  ['Diesel Filters', 'diesel-filters', 'Diesel fuel filters for CRDi and diesel engines.', '/images/cat-diesel-filters.jpg', 100],
+  ['Engine Oils', 'engine-oils', 'Engine oils: monograde, multigrade, petrol and diesel.', '/images/cat-engine-oils.jpg', 101],
+  ['Gear Oils', 'gear-oils', 'Gear and transmission lubricants.', '/images/cat-gear-oils.jpg', 102],
+  ['Transmission/ATF/CVT Fluids', 'transmission-atf-cvt-fluids', 'Automatic transmission and CVT fluids.', '/images/cat-transmission-fluids.jpg', 103],
+  ['Coolants', 'coolants', 'Radiator coolants and antifreeze.', '/images/cat-coolants.jpg', 104],
+  ['Cleaners', 'cleaners', 'Carburetor cleaners and automotive chemicals.', '/images/cat-cleaners.jpg', 105],
+  ['Other Lubricants/Automotive Fluids', 'other-lubricants-fluids', 'Other lubricants and automotive fluids.', '/images/cat-other-fluids.jpg', 106]
 ];
 
 /* ------------------------------------------------------------------ */
@@ -388,12 +395,13 @@ async function seed() {
   // products + compatibility (atomic)
   await db.transaction(async () => {
     for (const p of PRODUCTS) {
-      const r = await db.run(`INSERT INTO products (part_number, name, brand, category_id, description, price_ghs, stock_qty, low_stock_at, image_url, featured, active)
-        VALUES (@pn, @name, @brand, @cat, @desc, @price, @stock, @low, @img, @featured, 1)`, {
+      const r = await db.run(`INSERT INTO products (part_number, name, brand, category_id, description, price_ghs, stock_qty, low_stock_at, image_url, featured, active, normalized_part_number, fitment_status)
+        VALUES (@pn, @name, @brand, @cat, @desc, @price, @stock, @low, @img, @featured, 1, @norm, 'verified')`, {
         pn: p.pn, name: p.name, brand: p.brand, cat: catSlugToId[p.cat],
         desc: p.desc, price: p.price, stock: p.stock, low: 10,
         img: p.img || CATEGORIES.find(c => c[1] === p.cat)[3],
-        featured: p.featured
+        featured: p.featured,
+        norm: p.pn.toLowerCase().replace(/[^a-z0-9]/g, '')
       });
       for (const c of p.compat) {
         const row = parseCompat(c);

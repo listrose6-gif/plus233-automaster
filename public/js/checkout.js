@@ -22,6 +22,7 @@ async function render() {
   const r = await fetch('/api/products?ids=' + ids);
   const data = await r.json();
   const byId = Object.fromEntries(data.items.map(p => [p.id, p]));
+  const blockedItems = cart.map(i => byId[i.id]).filter(Boolean).filter(p => !PA.hasPrice(p) || p.stock_status === 'out' || p.stock_status === 'unverified');
   const s = await PA.settings();
 
   // prefill from signed-in account
@@ -37,7 +38,7 @@ async function render() {
   const subtotal = cart.reduce((acc, i) => {
     const p = byId[i.id];
     if (!p) return acc;
-    return acc + p.price_ghs * i.qty;
+    return acc + (p.price_ghs || 0) * i.qty;
   }, 0);
   const freeOver = parseFloat(s.free_delivery_over || '1500') || 0;
   const accraFee = parseFloat(s.delivery_fee_accra || '40') || 0;
@@ -106,15 +107,19 @@ async function render() {
           const p = byId[i.id];
           if (!p) return '';
           const out = p.stock_status === 'out';
+          const unv = p.stock_status === 'unverified';
+          const noPrice = !PA.hasPrice(p);
+          const priceSet = !noPrice;
+          const warn = out ? '⚠ Out of stock — remove from cart' : (unv ? '⚠ Stock verification in progress — remove from cart' : (noPrice ? '⚠ Price not yet set — remove from cart' : ''));
           return `
           <div class="co-item">
-            <img src="${p.image_url || '/images/placeholder-part.jpg'}" alt="">
+            <img src="${p.image_url || '/images/placeholder-part.svg'}" alt="">
             <div>
               <div class="co-name">${esc(p.name)}</div>
-              <div class="co-meta">${esc(p.part_number)} · Qty ${i.qty} · ${PA.fmt(p.price_ghs)} each</div>
-              ${out ? '<div style="color:var(--danger);font-size:.74rem">⚠ Out of stock — remove from cart</div>' : ''}
+              <div class="co-meta">${p.part_number ? esc(p.part_number) + ' · ' : ''}Qty ${i.qty} · ${priceSet ? PA.fmt(p.price_ghs) + ' each' : 'Price on request'}</div>
+              ${warn ? `<div style="color:var(--danger);font-size:.74rem">${warn}</div>` : ''}
             </div>
-            <span class="co-line">${PA.fmt(p.price_ghs * i.qty)}</span>
+            <span class="co-line">${priceSet ? PA.fmt(p.price_ghs * i.qty) : '—'}</span>
           </div>`;
         }).join('')}
       </div>
@@ -123,7 +128,8 @@ async function render() {
       <div class="sum-row"><span>Delivery type</span><span id="co-delivery-type" style="font-size:.8rem">calculated from city</span></div>
       <div class="sum-row total"><span>Total</span><span id="co-total">${PA.fmt(subtotal)}</span></div>
       <div class="sum-note">${PA.icons.shield}<span>Delivery is free on orders over ${PA.fmt(freeOver)}. Your part number, price and stock are verified by our system before the order is placed.</span></div>
-      <button class="btn btn-primary btn-block" id="place-order" style="font-size:1rem;padding:15px">PLACE ORDER — ${PA.fmt(subtotal)}</button>
+      ${blockedItems.length ? '<p style="color:var(--danger);font-size:.8rem;margin-top:8px">⚠ Some items are not available yet — remove them to place your order.</p>' : ''}
+      <button class="btn btn-primary btn-block" id="place-order" ${blockedItems.length ? 'disabled' : ''} style="font-size:1rem;padding:15px">PLACE ORDER — ${PA.fmt(subtotal)}</button>
       <a class="btn btn-ghost btn-block" href="/cart.html" style="margin-top:8px">Back to Cart</a>
     </aside>
   </div>`;
@@ -169,6 +175,10 @@ async function render() {
   }));
 
   btn.addEventListener('click', async () => {
+    if (blockedItems.length) {
+      PA.toast('Remove the unavailable items (price or stock not set) before placing your order', 'error');
+      return;
+    }
     const name = document.getElementById('co-name').value.trim();
     const phone = document.getElementById('co-phone').value.trim();
     const address = document.getElementById('co-address').value.trim();

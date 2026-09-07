@@ -9,7 +9,12 @@ async function load() {
   const r = await fetch('/api/products/' + id);
   if (!r.ok) { box.innerHTML = '<p style="color:var(--muted)">Product not found. <a href="/shop.html" style="color:var(--blue-2)">Browse the shop →</a></p>'; return; }
   const p = await r.json();
-  const out = p.stock_status === 'out';
+  const blocked = !PA.buyable(p);
+  const reason = PA.blockedReason(p);
+  const priceBlock = PA.hasPrice(p)
+    ? `<span class="pd-price"><small>GH₵</small>${PA.fmtNum(p.price_ghs)}</span>`
+    : '<span class="pd-price por" style="font-size:1.15rem">Price on request</span>';
+  const xrefList = (p.reference_numbers || '').split(',').map(s => s.trim()).filter(Boolean);
 
   document.title = p.name + ' — PLUS 233 AUTOMASTER';
   document.getElementById('pd-breadcrumb').innerHTML =
@@ -19,7 +24,7 @@ async function load() {
   <div class="pd-layout">
     <div class="pd-gallery">
       <div class="pd-main-img">
-        <img src="${p.image_url || '/images/placeholder-part.jpg'}" alt="${esc(p.name)}">
+        <img src="${p.image_url || '/images/placeholder-part.svg'}" alt="${esc(p.name)}">
       </div>
     </div>
     <div class="pd-info">
@@ -28,12 +33,19 @@ async function load() {
         ${PA.stockPill(p)}
       </div>
       <h1 class="pd-title">${esc(p.name)}</h1>
-      <div class="pd-pn">Part No. ${esc(p.part_number)}</div>
+      ${p.part_number ? `<div class="pd-pn">Part No. ${esc(p.part_number)}</div>` : ''}
+      ${xrefList.length ? `<div class="pd-xref">Reference / cross-reference: ${xrefList.map(x => `<span class="xref-chip">${esc(x)}</span>`).join(' ')}</div>` : ''}
       <div class="pd-price-row">
-        <span class="pd-price"><small>GH₵</small>${PA.fmtNum(p.price_ghs)}</span>
+        ${priceBlock}
         <span style="color:var(--muted);font-size:.86rem">${p.featured ? '★ Featured product' : 'Genuine quality assured'}</span>
       </div>
       <p class="pd-desc">${esc(p.description)}</p>
+
+      ${p.specifications ? `
+      <div class="pd-specs">
+        <h4>Specifications</h4>
+        <div class="pd-specs-body">${esc(p.specifications)}</div>
+      </div>` : ''}
 
       <div class="pd-meta">
         <div class="pd-meta-item">${PA.icons.shield}<div><b>100% Genuine</b>Quality checked &amp; guaranteed</div></div>
@@ -54,10 +66,10 @@ async function load() {
           <input id="pd-qty" type="number" value="1" min="1" max="99" aria-label="Quantity">
           <button class="pd-plus" type="button">+</button>
         </div>
-        <button class="btn btn-outline" id="pd-add" ${out ? 'disabled' : ''}>${PA.icons.cart} Add to Cart</button>
-        <button class="btn btn-primary" id="pd-buy" ${out ? 'disabled' : ''}>Buy Now</button>
+        <button class="btn btn-outline" id="pd-add" ${blocked ? 'disabled' : ''} ${reason ? `title="${esc(reason)}"` : ''}>${PA.icons.cart} Add to Cart</button>
+        <button class="btn btn-primary" id="pd-buy" ${blocked ? 'disabled' : ''} ${reason ? `title="${esc(reason)}"` : ''}>Buy Now</button>
       </div>
-      ${out ? '<p style="color:var(--danger);font-size:.86rem;margin-top:6px">This item is currently out of stock. Contact us to check restock timing.</p>' : ''}
+      ${reason ? `<p style="color:var(--danger);font-size:.86rem;margin-top:6px">${esc(reason)}. Contact us on <a href="/contact.html" style="text-decoration:underline">${esc((window.__PA_SETTINGS__ || {}).phone || 'the contact page')}</a> for help.</p>` : ''}
     </div>
   </div>`;
 

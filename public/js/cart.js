@@ -29,7 +29,8 @@ async function render() {
   } catch { /* keep local data */ }
 
   const byId = Object.fromEntries(products.map(p => [p.id, p]));
-  const subtotal = cart.reduce((s, i) => s + (byId[i.id] ? byId[i.id].price_ghs : i.price || 0) * i.qty, 0);
+  const subtotal = cart.reduce((s, i) => s + (byId[i.id] ? byId[i.id].price_ghs || 0 : i.price || 0) * i.qty, 0);
+  const blockedItems = cart.map(i => byId[i.id]).filter(p => p && (!PA.hasPrice(p) || p.stock_status === 'out' || p.stock_status === 'unverified'));
   const s = await PA.settings();
   const freeOver = parseFloat((s.free_delivery_over) || '1500') || 0;
   const accraFee = parseFloat((s.delivery_fee_accra) || '40') || 0;
@@ -45,16 +46,20 @@ async function render() {
           const img = p ? p.image_url : i.image;
           const name = p ? p.name : i.name;
           const pn = p ? p.part_number : i.part_number;
-          const out = p && p.stock_status === 'out';
+          const priceSet = p ? PA.hasPrice(p) : true;
+          const blocked = p && (p.stock_status === 'out' || p.stock_status === 'unverified' || !priceSet);
+          const warn = !p ? '' : (p.stock_status === 'out' ? 'Out of stock — remove to check out'
+            : (p.stock_status === 'unverified' ? 'Stock verification in progress — remove to check out'
+            : (!priceSet ? 'Price not yet set — remove to check out' : '')));
           const maxQty = 99;
           return `
           <div class="cart-item" data-cid="${i.id}">
-            <a href="/product.html?id=${i.id}"><img src="${img || '/images/placeholder-part.jpg'}" alt="${esc(name)}"></a>
+            <a href="/product.html?id=${i.id}"><img src="${img || '/images/placeholder-part.svg'}" alt="${esc(name)}"></a>
             <div>
               <div class="ci-name"><a href="/product.html?id=${i.id}">${esc(name)}</a></div>
               <div class="ci-meta">${esc(pn || '')}</div>
-              <div class="ci-price">${PA.fmt(price)} each</div>
-              ${out ? '<div style="color:var(--danger);font-size:.78rem">Out of stock — remove to check out</div>' : ''}
+              <div class="ci-price">${priceSet ? PA.fmt(price) + ' each' : 'Price on request'}</div>
+              ${warn ? `<div style="color:var(--danger);font-size:.78rem">${esc(warn)}</div>` : ''}
             </div>
             <div class="ci-right">
               <div class="qty-stepper">
@@ -62,7 +67,7 @@ async function render() {
                 <input class="c-qty" data-id="${i.id}" type="number" value="${i.qty}" min="1" max="${maxQty}" aria-label="Quantity">
                 <button class="c-plus" data-id="${i.id}" type="button">+</button>
               </div>
-              <span class="ci-line">${PA.fmt(price * i.qty)}</span>
+              <span class="ci-line">${priceSet ? PA.fmt(price * i.qty) : '—'}</span>
               <button class="remove-btn" data-remove="${i.id}" type="button">${PA.icons.trash} Remove</button>
             </div>
           </div>`;
@@ -81,7 +86,13 @@ async function render() {
     </aside>
   </div>`;
 
-  document.getElementById('go-checkout').addEventListener('click', () => location.href = '/checkout.html');
+  document.getElementById('go-checkout').addEventListener('click', () => {
+    if (blockedItems.length) {
+      PA.toast('Some items are not available yet (price or stock not set). Remove them to continue.', 'error');
+      return;
+    }
+    location.href = '/checkout.html';
+  });
   document.getElementById('cart-suggest').style.display = '';
   loadSuggestions();
 

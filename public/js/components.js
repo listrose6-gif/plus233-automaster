@@ -113,11 +113,24 @@ const PA = (() => {
   };
 
   /* ---------- stock helpers ---------- */
-  const stockLabel = (p) => p.stock_status === 'out' ? 'Out of Stock' : (p.stock_status === 'low' ? 'Limited Stock' : 'In Stock');
+  const stockLabel = (p) => p.stock_status === 'out' ? 'Out of Stock' : (p.stock_status === 'low' ? 'Limited Stock' : (p.stock_status === 'unverified' ? 'Availability to be confirmed' : 'In Stock'));
   const stockPill = (p) => {
     if (p.stock_status === 'out') return '<span class="stock-pill stock-out"><span class="dot"></span>Out of Stock</span>';
     if (p.stock_status === 'low') return '<span class="stock-pill stock-low"><span class="dot"></span>Limited Stock</span>';
+    if (p.stock_status === 'unverified') return '<span class="stock-pill stock-unv"><span class="dot"></span>Availability to be confirmed</span>';
     return '<span class="stock-pill stock-in"><span class="dot"></span>In Stock</span>';
+  };
+  /* NULL price_ghs = "Price on request" (admin has not set a price yet). */
+  const hasPrice = (p) => typeof p.price_ghs === 'number' && isFinite(p.price_ghs);
+  const priceHtml = (p) => hasPrice(p)
+    ? `<span class="price"><small>GH₵</small>${fmtNum(p.price_ghs)}</span>`
+    : '<span class="price por">Price on request</span>';
+  const buyable = (p) => hasPrice(p) && (p.stock_status === 'in' || p.stock_status === 'low');
+  const blockedReason = (p) => {
+    if (!hasPrice(p)) return 'Price not yet set by the store — please check back soon';
+    if (p.stock_status === 'unverified') return 'Stock verification in progress — please check back soon';
+    if (p.stock_status === 'out') return 'This item is currently out of stock';
+    return '';
   };
   const compatSummary = (p) => {
     if (!p.compatibility || !p.compatibility.length) return '';
@@ -139,21 +152,22 @@ const PA = (() => {
 
   /* ---------- product card ---------- */
   function productCard(p) {
-    const out = p.stock_status === 'out';
+    const blocked = !buyable(p);
+    const reason = blockedReason(p);
     return `
     <article class="pcard" data-id="${p.id}">
       <a class="pcard-img-wrap" href="/product.html?id=${p.id}">
         ${p.featured ? '<span class="pcard-badge badge-featured">★ Featured</span>' : ''}
         ${stockPill(p)}
-        <img src="${p.image_url || '/images/placeholder-part.jpg'}" alt="${esc(p.name)}" loading="lazy">
+        <img src="${p.image_url || '/images/placeholder-part.svg'}" alt="${esc(p.name)}" loading="lazy">
       </a>
       <div class="pcard-body">
         <div class="pcard-brand">${esc(p.brand)}</div>
         <div class="pcard-name"><a href="/product.html?id=${p.id}">${esc(p.name)}</a></div>
-        <div class="pcard-pn">Part No. ${esc(p.part_number)}</div>
+        ${p.part_number ? `<div class="pcard-pn">Part No. ${esc(p.part_number)}</div>` : ''}
         ${p.compatibility ? `<div class="pcard-compat">${icons.car}<span>${esc(compatSummary(p))}</span></div>` : ''}
         <div class="pcard-foot">
-          <span class="price"><small>GH₵</small>${fmtNum(p.price_ghs)}</span>
+          ${priceHtml(p)}
         </div>
         <div class="pcard-actions">
           <div class="qty-stepper">
@@ -161,9 +175,9 @@ const PA = (() => {
             <input class="q-input" data-id="${p.id}" type="number" value="1" min="1" max="99" aria-label="Quantity">
             <button class="q-plus" data-id="${p.id}" type="button">+</button>
           </div>
-          <button class="add-cart-btn" data-add="${p.id}" ${out ? 'disabled' : ''} type="button">${icons.cart} Add</button>
+          <button class="add-cart-btn" data-add="${p.id}" ${blocked ? 'disabled' : ''} type="button" ${blocked && reason ? `title="${esc(reason)}"` : ''}>${icons.cart} Add</button>
         </div>
-        <button class="buy-now-btn btn-block" data-buy="${p.id}" ${out ? 'disabled' : ''} type="button">Buy Now</button>
+        <button class="buy-now-btn btn-block" data-buy="${p.id}" ${blocked ? 'disabled' : ''} type="button" ${blocked && reason ? `title="${esc(reason)}"` : ''}>Buy Now</button>
       </div>
     </article>`;
   }
@@ -276,12 +290,12 @@ const PA = (() => {
     if (!data.items.length) { box.innerHTML = '<div class="search-empty">No products found for “' + esc(q) + '”. Try a part number like “BKR6E”.</div>'; return; }
     box.innerHTML = data.items.map(p => `
       <a class="search-hit" href="/product.html?id=${p.id}">
-        <img src="${p.image_url || '/images/placeholder-part.jpg'}" alt="">
+        <img src="${p.image_url || '/images/placeholder-part.svg'}" alt="">
         <div>
           <div class="hit-name">${esc(p.name)}</div>
-          <div class="hit-meta">${esc(p.brand)} · ${esc(p.part_number)} · ${esc(compatSummary(p))}</div>
+          <div class="hit-meta">${esc(p.brand)}${p.part_number ? ' · ' + esc(p.part_number) : ''}${p.compatibility && p.compatibility.length ? ' · ' + esc(compatSummary(p)) : ''}</div>
         </div>
-        <span class="hit-price">${fmt(p.price_ghs)}</span>
+        <span class="hit-price">${hasPrice(p) ? fmt(p.price_ghs) : 'Price on request'}</span>
       </a>`).join('') +
       `<a class="search-hit" href="/shop.html?q=${encodeURIComponent(q.trim())}"><div class="hit-name" style="color:var(--blue-2)">View all results →</div></a>`;
   }
@@ -363,7 +377,8 @@ const PA = (() => {
 
   return {
     settings, fmt, fmtNum, getCart, onCart, addToCart, setQty, removeFromCart, clearCart, cartCount, cartSubtotal,
-    toast, icons, stockLabel, stockPill, compatSummary, compatList, productCard, esc, init, save
+    toast, icons, stockLabel, stockPill, hasPrice, priceHtml, buyable, blockedReason,
+    compatSummary, compatList, productCard, esc, init, save
   };
 })();
 

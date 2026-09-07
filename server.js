@@ -73,6 +73,30 @@ async function lowStockThreshold() {
   return Number.isFinite(n) && n >= 0 ? n : DEFAULT_LOW_STOCK;
 }
 
+/* ---------------- catalogue helpers ----------------
+   normalized_part_number = part number stripped of spaces/hyphens, lowercased,
+   so "2630002502" / "26300 02502" finds "26300-02502".
+   stock_qty NULL  = stock not yet verified (admin will enter it). This is NOT
+   zero stock: customers must never be shown a false "Out of Stock".
+   price_ghs NULL  = price not yet set ("Price on request"); never purchasable.
+   fitment_status  = 'verified' | 'fitment_verification_required' (internal). */
+const FITMENT_VERIFIED = 'verified';
+const FITMENT_REQUIRED = 'fitment_verification_required';
+function normalizePart(s) {
+  return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+function stockStatusOf(qty, thr) {
+  if (qty === null || qty === undefined) return 'unverified';
+  if (qty <= 0) return 'out';
+  return qty <= thr ? 'low' : 'in';
+}
+function isUniquenessError(e) {
+  return !!e && (e.code === '23505' || /UNIQUE constraint failed|idx_products_/i.test(e.message || ''));
+}
+function duplicateProductError() {
+  return Object.assign(new Error('A product with the same part number and brand (or the same name for products without a part number) already exists.'), { status: 409 });
+}
+
 /* ---------------- serializers ----------------
    Admin serializer: exact stock numbers. Customer serializer (publicProduct):
    NEVER exposes quantities — only In Stock / Limited Stock / Out of Stock
@@ -93,8 +117,8 @@ async function compatForProducts(rows) {
 }
 async function productRow(p, compat = false) {
   const row = { ...p };
-  row.in_stock = p.stock_qty > 0;
-  row.stock_status = p.stock_qty <= 0 ? 'out' : (p.stock_qty <= p.low_stock_at ? 'low' : 'in');
+  row.in_stock = p.stock_qty !== null && p.stock_qty !== undefined && p.stock_qty > 0;
+  row.stock_status = stockStatusOf(p.stock_qty, p.low_stock_at);
   if (compat === true) {
     row.compatibility = await db.q(
       'SELECT make, model, year_start, year_end, engine FROM product_compatibility WHERE product_id = ? ORDER BY make, model', p.id
@@ -108,8 +132,10 @@ async function publicProduct(p, thr, compat = false) {
   const row = { ...p };
   delete row.stock_qty;
   delete row.low_stock_at;
-  row.in_stock = p.stock_qty > 0;
-  row.stock_status = p.stock_qty <= 0 ? 'out' : (p.stock_qty <= thr ? 'low' : 'in');
+  delete row.fitment_status;
+  delete row.normalized_part_number;
+  row.in_stock = p.stock_qty !== null && p.stock_qty !== undefined && p.stock_qty > 0;
+  row.stock_status = stockStatusOf(p.stock_qty, thr);
   if (compat === true) {
     row.compatibility = await db.q(
       'SELECT make, model, year_start, year_end, engine FROM product_compatibility WHERE product_id = ? ORDER BY make, model', p.id
@@ -209,7 +235,11 @@ app.get('/api/products', async (req, res) => {
     const items = await db.q(`SELECT * FROM products WHERE id IN (${list.map(() => '?').join(',')})`, list);
     return res.json({ items: await Promise.all(items.map(p => publicProduct(p, thr))), total: items.length, page: 1, pages: 1 });
   }
-  if (q) { where.push('(p.name LIKE @q OR p.part_number LIKE @q OR p.brand LIKE @q OR p.description LIKE @q)'); params.q = `%${q}%`; }
+  if (q) {
+    where.push('(p.name LIKE @q OR p.brand LIKE @q OR p.description LIKE @q OR p.part_number LIKE @q OR p.normalized_part_number LIKE @nq)');
+    params.q = `%${q}%`;
+    params.nq = `%${normalizePart(q)}%`;
+  }
   if (category) {
     const cat = await getCategory(category);
     if (!cat) return res.status(404).json({ error: 'Category not found' });
@@ -221,8 +251,8 @@ app.get('/api/products', async (req, res) => {
 
   const sortMap = {
     'new': 'p.id DESC',
-    'price-asc': 'p.price_ghs ASC',
-    'price-desc': 'p.price_ghs DESC',
+    'price-asc': '(p.price_ghs IS NULL) ASC, p.price_ghs ASC',
+    'price-desc': '(p.price_ghs IS NULL) ASC, p.price_ghs DESC',
     'name': 'p.name ASC',
     'featured': 'p.featured DESC, p.id ASC'
   };
@@ -282,10 +312,12 @@ app.post('/api/parts/find', async (req, res) => {
   if (!make || !model || !year) return res.status(400).json({ error: 'make, model and year are required' });
 
   const yearN = parseInt(year) || 0;
+  // Only products with VERIFIED fitment rows may appear in Find Parts results.
+  // Rows marked fitment_verification_required are never returned here.
   const rows = await db.q(`
     SELECT DISTINCT p.* FROM products p
     JOIN product_compatibility c ON c.product_id = p.id
-    WHERE p.active = 1 AND (
+    WHERE p.active = 1 AND p.fitment_status = 'verified' AND (
       (c.make = ? AND c.model = ? AND ? BETWEEN c.year_start AND c.year_end
         AND (c.engine = '' OR c.engine LIKE '%' || ? || '%' OR ? = ''))
       OR c.make = 'Universal'
@@ -327,6 +359,14 @@ app.post('/api/orders', rateLimit(15, 60 * 1000, 'orders'), async (req, res) => 
       for (const it of items) {
         const p = await db.get('SELECT id, name, part_number, price_ghs, stock_qty FROM products WHERE id = ? AND active = 1', +it.id);
         if (!p) throw Object.assign(new Error(`Product #${it.id} not found`), { status: 400 });
+        // Catalogue safety: nothing without an admin-set price or an admin-verified
+        // stock quantity may ever be ordered (defence in depth on top of the UI).
+        if (p.price_ghs === null || p.price_ghs === undefined) {
+          throw Object.assign(new Error(`Pricing for ${p.name} has not been set yet. Please contact us or try again later.`), { status: 409 });
+        }
+        if (p.stock_qty === null || p.stock_qty === undefined) {
+          throw Object.assign(new Error(`Stock for ${p.name} has not been verified yet. Please contact us or try again later.`), { status: 409 });
+        }
         const qty = Math.max(1, parseInt(it.qty) || 1);
         lines.push({ product: p, qty });
       }
@@ -494,7 +534,7 @@ app.get('/api/admin/stats', requireAdmin, async (req, res) => {
 app.get('/api/admin/products', requireAdmin, async (req, res) => {
   const { q, category, page = 1, per_page = 20 } = req.query;
   const where = ['1=1']; const params = {};
-  if (q) { where.push('(p.name LIKE @q OR p.part_number LIKE @q OR p.brand LIKE @q)'); params.q = `%${q}%`; }
+  if (q) { where.push('(p.name LIKE @q OR p.part_number LIKE @q OR p.brand LIKE @q OR p.normalized_part_number LIKE @nq)'); params.q = `%${q}%`; params.nq = `%${normalizePart(q)}%`; }
   if (category) { where.push('p.category_id = @c'); params.c = +category; }
   const p = Math.max(1, parseInt(page) || 1);
   const total = (await db.get(`SELECT COUNT(*) c FROM products p WHERE ${where.join(' AND ')}`, params)).c;
@@ -504,24 +544,39 @@ app.get('/api/admin/products', requireAdmin, async (req, res) => {
 });
 
 function productPayload(body) {
-  const { part_number, name, brand, category_id, description, price_ghs, stock_qty, low_stock_at, image_url, featured, active, compatibility } = body;
-  if (!part_number || !name || !brand || !category_id || price_ghs === undefined) {
-    throw Object.assign(new Error('Missing required fields (part_number, name, brand, category_id, price_ghs)'), { status: 400 });
+  const { part_number, name, brand, category_id, description, price_ghs, stock_qty, low_stock_at, image_url, featured, active, compatibility, reference_numbers, specifications, fitment_status } = body;
+  if (!name || !brand || !category_id) {
+    throw Object.assign(new Error('Missing required fields (name, brand, category_id)'), { status: 400 });
   }
-  if (isNaN(+price_ghs) || +price_ghs < 0) throw Object.assign(new Error('Invalid price'), { status: 400 });
+  const pn = String(part_number === undefined || part_number === null ? '' : part_number).trim();
+  // price: blank / missing / null = "Price on request" (never invented, never 0)
+  let price = null;
+  if (price_ghs !== undefined && price_ghs !== null && String(price_ghs).trim() !== '') {
+    if (isNaN(+price_ghs) || +price_ghs < 0) throw Object.assign(new Error('Invalid price'), { status: 400 });
+    price = +price_ghs;
+  }
+  // stock: blank / missing / null = "stock verification required" (NOT zero stock)
+  let stock = null;
+  if (stock_qty !== undefined && stock_qty !== null && String(stock_qty).trim() !== '') {
+    stock = Math.max(0, parseInt(stock_qty) || 0);
+  }
   return {
-    part_number: String(part_number).trim(),
+    part_number: pn,
     name: String(name).trim(),
     brand: String(brand).trim(),
     category_id: +category_id,
     description: description || '',
-    price_ghs: +price_ghs,
-    stock_qty: Math.max(0, parseInt(stock_qty) || 0),
+    price_ghs: price,
+    stock_qty: stock,
     low_stock_at: Math.max(1, parseInt(low_stock_at) || 10),
     image_url: image_url || '',
     featured: featured ? 1 : 0,
     active: active === undefined || active === 1 || active === '1' || active === true ? 1 : 0,
-    compatibility: Array.isArray(compatibility) ? compatibility : []
+    compatibility: Array.isArray(compatibility) ? compatibility : [],
+    reference_numbers: String(reference_numbers || '').trim(),
+    specifications: String(specifications || '').trim(),
+    normalized_part_number: normalizePart(pn),
+    fitment_status: fitment_status === 'verified' ? FITMENT_VERIFIED : FITMENT_REQUIRED
   };
 }
 
@@ -536,9 +591,16 @@ async function insertCompat(productId, list) {
 app.post('/api/admin/products', requireAdmin, async (req, res) => {
   try {
     const d = productPayload(req.body);
-    const r = await db.run(`INSERT INTO products (part_number, name, brand, category_id, description, price_ghs, stock_qty, low_stock_at, image_url, featured, active)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-      d.part_number, d.name, d.brand, d.category_id, d.description, d.price_ghs, d.stock_qty, d.low_stock_at, d.image_url, d.featured, d.active);
+    let r;
+    try {
+      r = await db.run(`INSERT INTO products (part_number, name, brand, category_id, description, price_ghs, stock_qty, low_stock_at, image_url, featured, active, reference_numbers, specifications, normalized_part_number, fitment_status)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        d.part_number, d.name, d.brand, d.category_id, d.description, d.price_ghs, d.stock_qty, d.low_stock_at, d.image_url, d.featured, d.active,
+        d.reference_numbers, d.specifications, d.normalized_part_number, d.fitment_status);
+    } catch (e) {
+      if (isUniquenessError(e)) throw duplicateProductError();
+      throw e;
+    }
     await insertCompat(r.lastInsertRowid, d.compatibility);
     const p = await db.get('SELECT * FROM products WHERE id = ?', r.lastInsertRowid);
     res.status(201).json(await productRow(p, true));
@@ -550,8 +612,14 @@ app.put('/api/admin/products/:id', requireAdmin, async (req, res) => {
     const d = productPayload(req.body);
     const exists = await db.get('SELECT id FROM products WHERE id = ?', +req.params.id);
     if (!exists) return res.status(404).json({ error: 'Product not found' });
-    await db.run(`UPDATE products SET part_number=?, name=?, brand=?, category_id=?, description=?, price_ghs=?, stock_qty=?, low_stock_at=?, image_url=?, featured=?, active=?, updated_at=datetime('now') WHERE id=?`,
-      d.part_number, d.name, d.brand, d.category_id, d.description, d.price_ghs, d.stock_qty, d.low_stock_at, d.image_url, d.featured, d.active, exists.id);
+    try {
+      await db.run(`UPDATE products SET part_number=?, name=?, brand=?, category_id=?, description=?, price_ghs=?, stock_qty=?, low_stock_at=?, image_url=?, featured=?, active=?, reference_numbers=?, specifications=?, normalized_part_number=?, fitment_status=?, updated_at=datetime('now') WHERE id=?`,
+        d.part_number, d.name, d.brand, d.category_id, d.description, d.price_ghs, d.stock_qty, d.low_stock_at, d.image_url, d.featured, d.active,
+        d.reference_numbers, d.specifications, d.normalized_part_number, d.fitment_status, exists.id);
+    } catch (e) {
+      if (isUniquenessError(e)) throw duplicateProductError();
+      throw e;
+    }
     await db.run('DELETE FROM product_compatibility WHERE product_id = ?', exists.id);
     await insertCompat(exists.id, d.compatibility);
     const p = await db.get('SELECT * FROM products WHERE id = ?', exists.id);
@@ -574,8 +642,12 @@ app.delete('/api/admin/products/:id', requireAdmin, async (req, res) => {
 
 app.put('/api/admin/stock/:id', requireAdmin, async (req, res) => {
   const { stock_qty, low_stock_at } = req.body || {};
+  let stock = null;
+  if (stock_qty !== undefined && stock_qty !== null && String(stock_qty).trim() !== '') {
+    stock = Math.max(0, parseInt(stock_qty) || 0);
+  }
   await db.run('UPDATE products SET stock_qty = ?, low_stock_at = ?, updated_at = datetime(\'now\') WHERE id = ?',
-    Math.max(0, parseInt(stock_qty) || 0), Math.max(1, parseInt(low_stock_at) || 10), +req.params.id);
+    stock, Math.max(1, parseInt(low_stock_at) || 10), +req.params.id);
   res.json({ ok: true });
 });
 

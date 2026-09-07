@@ -202,13 +202,13 @@ async function vProducts(box) {
         <thead><tr><th></th><th>Product</th><th>Category</th><th>Price (GH₵)</th><th>Stock</th><th>Featured</th><th>Status</th><th style="text-align:right">Actions</th></tr></thead>
         <tbody>
           ${d.items.map(p => `<tr>
-            <td><img class="t-img" src="${p.image_url || '/images/placeholder-part.jpg'}" alt=""></td>
-            <td><div class="t-prod-name">${esc(p.name)}</div><div class="t-part">${esc(p.part_number)} · ${esc(p.brand)}</div>
-              <div class="t-muted">${(p.compatibility || []).length} compatibility entries</div></td>
+            <td><img class="t-img" src="${p.image_url || '/images/placeholder-part.svg'}" alt=""></td>
+            <td><div class="t-prod-name">${esc(p.name)}</div><div class="t-part">${p.part_number ? esc(p.part_number) + ' · ' : ''}${esc(p.brand)}</div>
+              <div class="t-muted">${(p.compatibility || []).length} compatibility entries${p.fitment_status === 'fitment_verification_required' ? ' · <span class="tag tag-warn">fitment unverified</span>' : ''}</div></td>
             <td class="t-muted">${esc(p.category_name)}</td>
-            <td><b>${PA.fmt(p.price_ghs)}</b></td>
-            <td><input class="stock-input" data-stock="${p.id}" type="number" value="${p.stock_qty}" min="0" title="Update stock">
-              ${p.stock_qty <= p.low_stock_at ? '<span class="tag tag-warn">low</span>' : ''}</td>
+            <td>${(p.price_ghs === null || p.price_ghs === undefined) ? '<span class="t-muted">Price on request</span>' : '<b>' + PA.fmt(p.price_ghs) + '</b>'}</td>
+            <td><input class="stock-input" data-stock="${p.id}" type="number" value="${p.stock_qty === null || p.stock_qty === undefined ? '' : p.stock_qty}" min="0" title="Update stock — leave blank while stock is unverified">
+              ${(p.stock_qty === null || p.stock_qty === undefined) ? '<span class="tag tag-warn">verify stock</span>' : (p.stock_qty <= p.low_stock_at ? '<span class="tag tag-warn">low</span>' : '')}</td>
             <td>${p.featured ? '★' : '—'}</td>
             <td>${p.active ? '<span class="tag tag-green">active</span>' : '<span class="tag tag-gray">hidden</span>'}</td>
             <td style="text-align:right;white-space:nowrap">
@@ -246,7 +246,7 @@ async function vProducts(box) {
     PA.toast('Product deleted', 'success'); vProducts(box);
   }));
   box.querySelectorAll('[data-stock]').forEach(inp => inp.addEventListener('change', async () => {
-    await api.put('/api/admin/stock/' + inp.dataset.stock, { stock_qty: parseInt(inp.value) || 0 });
+    await api.put('/api/admin/stock/' + inp.dataset.stock, { stock_qty: inp.value === '' ? null : (parseInt(inp.value) || 0) });
     PA.toast('Stock updated', 'success');
   }));
 }
@@ -255,7 +255,7 @@ async function openProductModal(id) {
   const cats = await api.get('/api/admin/categories');
   let p = null;
   if (id) p = await api.get('/api/admin/products/' + id);
-  p = p || { part_number: '', name: '', brand: '', category_id: cats[0] ? cats[0].id : '', description: '', price_ghs: '', stock_qty: 0, low_stock_at: 10, image_url: '', featured: 0, active: 1, compatibility: [] };
+  p = p || { part_number: '', name: '', brand: '', category_id: cats[0] ? cats[0].id : '', description: '', price_ghs: '', stock_qty: '', low_stock_at: 10, image_url: '', featured: 0, active: 1, compatibility: [], reference_numbers: '', specifications: '', fitment_status: 'fitment_verification_required' };
 
   const compRows = (p.compatibility && p.compatibility.length ? p.compatibility : [{ make: '', model: '', year_start: '', year_end: '', engine: '' }])
     .map(c => compatRow(c)).join('');
@@ -264,17 +264,25 @@ async function openProductModal(id) {
     <div class="modal-head"><h3>${id ? 'Edit Product' : 'New Product'}</h3>
       <button class="icon-btn" onclick="closeModal()">${PA.icons.close}</button></div>
     <div class="modal-body" style="grid-template-columns:1fr 1fr">
-      <div class="field"><label>Part Number *</label><input id="f-pn" value="${esc(p.part_number)}" placeholder="e.g. NGK-BKR6E-11"></div>
-      <div class="field"><label>Brand *</label><input id="f-brand" value="${esc(p.brand)}" placeholder="e.g. NGK"></div>
-      <div class="field full" style="grid-column:1/-1"><label>Product Name *</label><input id="f-name" value="${esc(p.name)}" placeholder="e.g. NGK BKR6E-11 Spark Plug"></div>
+      <div class="field"><label>Part Number <span class="t-muted" style="text-transform:none">(optional for oils/fluids)</span></label><input id="f-pn" value="${esc(p.part_number)}" placeholder="e.g. 04152-31090 or leave blank"></div>
+      <div class="field"><label>Brand *</label><input id="f-brand" value="${esc(p.brand)}" placeholder="e.g. Toyota"></div>
+      <div class="field full" style="grid-column:1/-1"><label>Product Name *</label><input id="f-name" value="${esc(p.name)}" placeholder="e.g. Toyota Oil Filter 04152-31090"></div>
       <div class="field"><label>Category *</label>
         <select id="f-cat">${cats.map(c => `<option value="${c.id}" ${+p.category_id === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
       </div>
-      <div class="field"><label>Price (GH₵) *</label><input id="f-price" type="number" min="0" step="0.01" value="${p.price_ghs}"></div>
-      <div class="field"><label>Stock Quantity</label><input id="f-stock" type="number" min="0" value="${p.stock_qty}"></div>
+      <div class="field"><label>Price (GH₵) <span class="t-muted" style="text-transform:none">(blank = price on request)</span></label><input id="f-price" type="number" min="0" step="0.01" value="${p.price_ghs === null || p.price_ghs === undefined ? '' : p.price_ghs}"></div>
+      <div class="field"><label>Stock Quantity <span class="t-muted" style="text-transform:none">(blank = stock verification required)</span></label><input id="f-stock" type="number" min="0" value="${p.stock_qty === null || p.stock_qty === undefined ? '' : p.stock_qty}"></div>
       <div class="field"><label>Low-stock alert at</label><input id="f-low" type="number" min="1" value="${p.low_stock_at}"></div>
+      <div class="field"><label>Reference / cross-reference numbers</label><input id="f-xref" value="${esc(p.reference_numbers || '')}" placeholder="e.g. D976, GDB3535 (comma separated)"></div>
+      <div class="field"><label>Fitment status</label>
+        <select id="f-fit">
+          <option value="fitment_verification_required" ${p.fitment_status === 'fitment_verification_required' || !p.fitment_status ? 'selected' : ''}>Fitment verification required</option>
+          <option value="verified" ${p.fitment_status === 'verified' ? 'selected' : ''}>Verified</option>
+        </select>
+      </div>
       <div class="field full" style="grid-column:1/-1"><label>Image URL (optional)</label><input id="f-img" value="${esc(p.image_url)}" placeholder="/images/… or https://…"></div>
       <div class="field full" style="grid-column:1/-1"><label>Description</label><textarea id="f-desc" style="min-height:70px">${esc(p.description)}</textarea></div>
+      <div class="field full" style="grid-column:1/-1"><label>Specifications <span class="t-muted" style="text-transform:none">(package size, thread, grade etc.)</span></label><textarea id="f-specs" style="min-height:56px">${esc(p.specifications || '')}</textarea></div>
       <label style="display:flex;gap:8px;align-items:center;color:var(--text-2);font-size:.9rem"><input type="checkbox" id="f-featured" ${p.featured ? 'checked' : ''} style="accent-color:var(--blue)"> Featured product</label>
       <label style="display:flex;gap:8px;align-items:center;color:var(--text-2);font-size:.9rem"><input type="checkbox" id="f-active" ${p.active ? 'checked' : ''} style="accent-color:var(--blue)"> Active (visible in store)</label>
       <div class="full" style="grid-column:1/-1">
@@ -297,10 +305,14 @@ async function openProductModal(id) {
       });
       document.getElementById('modal-primary').addEventListener('click', async () => {
         const data = {
-          part_number: val('f-pn'), name: val('f-name'), brand: val('f-brand'),
-          category_id: +val('f-cat'), price_ghs: parseFloat(val('f-price')),
-          stock_qty: parseInt(val('f-stock')), low_stock_at: parseInt(val('f-low')) || 10,
+          part_number: val('f-pn').trim(), name: val('f-name').trim(), brand: val('f-brand').trim(),
+          category_id: +val('f-cat'),
+          price_ghs: val('f-price') === '' ? null : parseFloat(val('f-price')),
+          stock_qty: val('f-stock') === '' ? null : parseInt(val('f-stock')),
+          low_stock_at: parseInt(val('f-low')) || 10,
           image_url: val('f-img'), description: val('f-desc'),
+          reference_numbers: val('f-xref'), specifications: val('f-specs'),
+          fitment_status: document.getElementById('f-fit').value,
           featured: document.getElementById('f-featured').checked ? 1 : 0,
           active: document.getElementById('f-active').checked ? 1 : 0,
           compatibility: [...m.querySelectorAll('.compat-row')].map(r => ({
@@ -311,8 +323,11 @@ async function openProductModal(id) {
             engine: r.querySelector('.c-eng').value.trim()
           })).filter(c => c.make || c.model)
         };
-        if (!data.part_number || !data.name || !data.brand || isNaN(data.price_ghs)) {
-          PA.toast('Fill in part number, name, brand and price', 'error'); return;
+        if (!data.name || !data.brand || !data.category_id) {
+          PA.toast('Fill in product name, brand and category', 'error'); return;
+        }
+        if (data.price_ghs !== null && (isNaN(data.price_ghs) || data.price_ghs < 0)) {
+          PA.toast('Invalid price', 'error'); return;
         }
         try {
           if (id) await api.put('/api/admin/products/' + id, data);
@@ -474,7 +489,7 @@ async function vCategories(box) {
         <thead><tr><th></th><th>Name</th><th>Slug</th><th>Products</th><th>Order</th><th>Status</th><th style="text-align:right">Actions</th></tr></thead>
         <tbody>
           ${d.map(c => `<tr>
-            <td><img class="t-img" src="${c.image || '/images/placeholder-cat.jpg'}" alt=""></td>
+            <td><img class="t-img" src="${c.image || '/images/placeholder-cat.svg'}" alt=""></td>
             <td class="t-prod-name">${esc(c.name)}</td>
             <td class="t-part">${esc(c.slug)}</td>
             <td>${c.product_count}</td>

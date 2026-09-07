@@ -11,7 +11,7 @@ async function loadCategories() {
     const cats = await r.json();
     grid.innerHTML = cats.map(c => `
       <a class="cat-card" href="/shop.html?category=${encodeURIComponent(c.slug)}">
-        <img src="${c.image || '/images/placeholder-cat.jpg'}" alt="${esc(c.name)}" loading="lazy">
+        <img src="${c.image || '/images/placeholder-cat.svg'}" alt="${esc(c.name)}" loading="lazy">
         <div class="cat-body">
           <div class="cat-name">${esc(c.name)}</div>
           <div class="cat-count">${PA.icons.arrowRight}<span>Browse</span></div>

@@ -48,19 +48,23 @@ CREATE TABLE IF NOT EXISTS categories (
 );
 CREATE TABLE IF NOT EXISTS products (
   id           SERIAL PRIMARY KEY,
-  part_number  TEXT NOT NULL UNIQUE,
+  part_number  TEXT NOT NULL DEFAULT '',
   name         TEXT NOT NULL,
   brand        TEXT NOT NULL,
   category_id  INTEGER NOT NULL REFERENCES categories(id),
   description  TEXT DEFAULT '',
-  price_ghs    REAL NOT NULL CHECK (price_ghs >= 0),
-  stock_qty    INTEGER NOT NULL DEFAULT 0,
+  price_ghs    REAL CHECK (price_ghs IS NULL OR price_ghs >= 0),
+  stock_qty    INTEGER DEFAULT NULL,
   low_stock_at INTEGER NOT NULL DEFAULT 10,
   image_url    TEXT DEFAULT '',
   featured     INTEGER DEFAULT 0,
   active       INTEGER DEFAULT 1,
   created_at   TIMESTAMPTZ DEFAULT now(),
-  updated_at   TIMESTAMPTZ DEFAULT now()
+  updated_at   TIMESTAMPTZ DEFAULT now(),
+  reference_numbers       TEXT NOT NULL DEFAULT '',
+  specifications          TEXT NOT NULL DEFAULT '',
+  normalized_part_number  TEXT NOT NULL DEFAULT '',
+  fitment_status          TEXT NOT NULL DEFAULT 'fitment_verification_required'
 );
 CREATE TABLE IF NOT EXISTS product_compatibility (
   id         SERIAL PRIMARY KEY,
@@ -163,19 +167,23 @@ CREATE TABLE IF NOT EXISTS categories (
 );
 CREATE TABLE IF NOT EXISTS products (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  part_number TEXT NOT NULL UNIQUE,
+  part_number TEXT NOT NULL DEFAULT '',
   name        TEXT NOT NULL,
   brand       TEXT NOT NULL,
   category_id INTEGER NOT NULL REFERENCES categories(id),
   description TEXT DEFAULT '',
-  price_ghs   REAL NOT NULL CHECK (price_ghs >= 0),
-  stock_qty   INTEGER NOT NULL DEFAULT 0,
+  price_ghs   REAL CHECK (price_ghs IS NULL OR price_ghs >= 0),
+  stock_qty   INTEGER DEFAULT NULL,
   low_stock_at INTEGER NOT NULL DEFAULT 10,
   image_url   TEXT DEFAULT '',
   featured    INTEGER DEFAULT 0,
   active      INTEGER DEFAULT 1,
   created_at  TEXT DEFAULT (datetime('now')),
-  updated_at  TEXT DEFAULT (datetime('now'))
+  updated_at  TEXT DEFAULT (datetime('now')),
+  reference_numbers       TEXT NOT NULL DEFAULT '',
+  specifications          TEXT NOT NULL DEFAULT '',
+  normalized_part_number  TEXT NOT NULL DEFAULT '',
+  fitment_status          TEXT NOT NULL DEFAULT 'fitment_verification_required'
 );
 CREATE TABLE IF NOT EXISTS product_compatibility (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -386,6 +394,26 @@ async function init() {
     // older PG schema lacked updated_at on users; boot-time admin sync sets it
     await pgPool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now()');
     await pgPool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_email ON customers(email) WHERE email <> ''`);
+    // ——— additive catalogue-readiness migrations (idempotent, run every boot) ———
+    await pgPool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS reference_numbers TEXT NOT NULL DEFAULT ''`);
+    await pgPool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS specifications TEXT NOT NULL DEFAULT ''`);
+    await pgPool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS normalized_part_number TEXT NOT NULL DEFAULT ''`);
+    await pgPool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS fitment_status TEXT NOT NULL DEFAULT 'fitment_verification_required'`);
+    await pgPool.query(`ALTER TABLE products ALTER COLUMN price_ghs DROP NOT NULL`);
+    await pgPool.query(`ALTER TABLE products ALTER COLUMN stock_qty DROP NOT NULL`);
+    await pgPool.query(`ALTER TABLE products DROP CONSTRAINT IF EXISTS products_price_ghs_check`);
+    await pgPool.query(`ALTER TABLE products ADD CONSTRAINT products_price_ghs_check CHECK (price_ghs IS NULL OR price_ghs >= 0)`);
+    await pgPool.query(`ALTER TABLE products DROP CONSTRAINT IF EXISTS products_part_number_key`);
+    await pgPool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_products_part_brand ON products(part_number, brand) WHERE part_number <> ''`);
+    await pgPool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_products_blank_name ON products(lower(name), brand) WHERE part_number = ''`);
+    await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_products_normalized ON products(normalized_part_number)`);
+    await pgPool.query(`UPDATE products SET normalized_part_number = lower(regexp_replace(part_number, '[^a-zA-Z0-9]', '', 'g')) WHERE normalized_part_number = '' AND part_number <> ''`);
+    // legacy rows that already expose compatibility rows keep behaving as before;
+    // anything without compatibility rows stays flagged fitment_verification_required
+    await pgPool.query(`UPDATE products SET fitment_status = 'verified'
+      WHERE fitment_status = 'fitment_verification_required'
+        AND part_number <> ''
+        AND EXISTS (SELECT 1 FROM product_compatibility pc WHERE pc.product_id = products.id)`);
   } else {
     const Database = require('better-sqlite3');
     const DATA_DIR = path.join(__dirname, '..', 'data');
@@ -394,6 +422,59 @@ async function init() {
     sqliteDb.pragma('journal_mode = WAL');
     sqliteDb.pragma('foreign_keys = ON');
     sqliteDb.exec(SQLITE_SCHEMA);
+    // ——— additive catalogue-readiness migrations (idempotent) ———
+    // If an older dev DB still has UNIQUE on part_number (or NOT NULL price),
+    // rebuild the products table with the new shape, preserving all data.
+    const uniqIdx = sqliteDb.prepare("PRAGMA index_list('products')").all().filter(i => i.origin === 'u' && i.unique);
+    if (uniqIdx.length) {
+      sqliteDb.exec('PRAGMA foreign_keys = OFF');
+      sqliteDb.exec('BEGIN');
+      sqliteDb.exec('ALTER TABLE products RENAME TO products_legacy');
+      sqliteDb.exec(`CREATE TABLE products (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        part_number TEXT NOT NULL DEFAULT '',
+        name        TEXT NOT NULL,
+        brand       TEXT NOT NULL,
+        category_id INTEGER NOT NULL REFERENCES categories(id),
+        description TEXT DEFAULT '',
+        price_ghs   REAL CHECK (price_ghs IS NULL OR price_ghs >= 0),
+        stock_qty   INTEGER DEFAULT NULL,
+        low_stock_at INTEGER NOT NULL DEFAULT 10,
+        image_url   TEXT DEFAULT '',
+        featured    INTEGER DEFAULT 0,
+        active      INTEGER DEFAULT 1,
+        created_at  TEXT DEFAULT (datetime('now')),
+        updated_at  TEXT DEFAULT (datetime('now')),
+        reference_numbers       TEXT NOT NULL DEFAULT '',
+        specifications          TEXT NOT NULL DEFAULT '',
+        normalized_part_number  TEXT NOT NULL DEFAULT '',
+        fitment_status          TEXT NOT NULL DEFAULT 'fitment_verification_required'
+      )`);
+      sqliteDb.exec(`INSERT INTO products (id, part_number, name, brand, category_id, description, price_ghs, stock_qty, low_stock_at, image_url, featured, active, created_at, updated_at)
+        SELECT id, part_number, name, brand, category_id, description, price_ghs, stock_qty, low_stock_at, image_url, featured, active, created_at, updated_at FROM products_legacy`);
+      sqliteDb.exec('DROP TABLE products_legacy');
+      sqliteDb.exec('COMMIT');
+      sqliteDb.exec('PRAGMA foreign_keys = ON');
+    } else {
+      const prodCols = sqliteDb.prepare('PRAGMA table_info(products)').all().map(c => c.name);
+      const prodAdd = {
+        reference_numbers: "TEXT NOT NULL DEFAULT ''",
+        specifications: "TEXT NOT NULL DEFAULT ''",
+        normalized_part_number: "TEXT NOT NULL DEFAULT ''",
+        fitment_status: "TEXT NOT NULL DEFAULT 'fitment_verification_required'"
+      };
+      for (const [col, ddl] of Object.entries(prodAdd)) {
+        if (!prodCols.includes(col)) sqliteDb.exec(`ALTER TABLE products ADD COLUMN ${col} ${ddl}`);
+      }
+    }
+    sqliteDb.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_products_part_brand ON products(part_number, brand) WHERE part_number != ''`);
+    sqliteDb.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_products_blank_name ON products(lower(name), brand) WHERE part_number = ''`);
+    sqliteDb.exec(`CREATE INDEX IF NOT EXISTS idx_products_normalized ON products(normalized_part_number)`);
+    sqliteDb.exec(`UPDATE products SET normalized_part_number = lower(replace(replace(part_number,'-',''),' ','')) WHERE normalized_part_number = '' AND part_number <> ''`);
+    sqliteDb.exec(`UPDATE products SET fitment_status = 'verified'
+      WHERE fitment_status = 'fitment_verification_required'
+        AND part_number <> ''
+        AND EXISTS (SELECT 1 FROM product_compatibility pc WHERE pc.product_id = products.id)`);
     const custCols = sqliteDb.prepare('PRAGMA table_info(customers)').all().map(c => c.name);
     if (!custCols.includes('password_hash')) {
       sqliteDb.exec("ALTER TABLE customers ADD COLUMN password_hash TEXT DEFAULT ''");
